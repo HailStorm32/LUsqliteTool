@@ -3,13 +3,14 @@ from enum import IntEnum, StrEnum
 from typing import List, Dict, Optional
 
 #####################################
-# Types
+# Types and Constants
 #####################################
 INT_32_MAX = 2_147_483_647  # Maximum value for a 32-bit signed integer
+PLACEHOLDER_TEXT = "Placeholder String"
 
 class NPCProfession(IntEnum):
-    VENDOR          = 1
-    MISSION_GIVER   = 2
+    VENDOR              = 1
+    MISSION_GIVER       = 2
 
 class ItemType(IntEnum):
     UNKNOWN             = -1   # An unknown item type
@@ -39,14 +40,33 @@ class ItemType(IntEnum):
     MOUNT               = 24   # A mount
 
 class EquipLocation(StrEnum):
-    HAIR        = "hair"
-    HEAD        = "head"
-    NECK        = "clavicle"
-    CHEST       = "chest"
-    LEFT_HAND   = "special_l"
-    RIGHT_HAND  = "special_r"
-    LEGS        = "legs"
-    ACCESSORY   = "accessory"
+    HAIR                = "hair"
+    HEAD                = "head"
+    NECK                = "clavicle"
+    CHEST               = "chest"
+    LEFT_HAND           = "special_l"
+    RIGHT_HAND          = "special_r"
+    LEGS                = "legs"
+    ACCESSORY           = "accessory"
+
+class ObjectTypes(StrEnum):
+    ITEM                = "Loot"
+    NPC                 = "UserGeneratedNPCs"
+    NPC_2               = "NPC"
+    ENEMY               = "Enemies"
+
+class Components(IntEnum):
+    CONTROLLABLE_PHYSICS = 1
+    RENDER               = 2
+    SIMPLE_PHYSICS       = 3
+    SCRIPT               = 5
+    DESTROYABLE          = 7
+    SKILL                = 9
+    ITEM                 = 11
+    VENDOR               = 16
+    INVENTORY            = 17
+    MINIFIG              = 35
+    MISSION_OFFER        = 73
 
 
 ####################################
@@ -99,7 +119,7 @@ class ObjectSkillRow:
 
 
 @dataclass
-class ObjectSkill:
+class ObjectSkills:
     # object_id:                  int
     skills:                     List[ObjectSkillRow] = field(default_factory=list)
     dirty:                      bool            = False
@@ -153,18 +173,47 @@ class ItemComponent:
 
     dirty: bool = False
 
+#------------------------------------------
+# -------- GameObject (Objects)------------
 @dataclass
 class GameObject:
-    object_id: int
-    name: str
-    components: Dict[str, object] = field(default_factory=dict)
-    
+    object_id:                  int             = INT_32_MAX            # INT32
+    name:                       str             = PLACEHOLDER_TEXT      # TEXT4
+    placeable:                  bool            = False                 # INT_BOOL (0)
+    type:                       ObjectTypes     = None                  # TEXT4
+    description:                str             = PLACEHOLDER_TEXT      # TEXT4
+    localize:                   Optional[bool]  = True                  # INT_BOOL (1)
+    npc_template_id:            Optional[int]   = None                  # INT32
+    display_name:               Optional[str]   = PLACEHOLDER_TEXT      # TEXT4
+    interaction_distance:       Optional[float] = None                  # REAL
+    nametag:                    Optional[bool]  = False                 # INT_BOOL (0)
+    internal_notes:             Optional[str]   = PLACEHOLDER_TEXT      # TEXT4
+    loc_status:                 Optional[int]   = 2                     # INT32
+    gate_version:               Optional[str]   = None                  # TEXT4
+    hq_valid:                   Optional[bool]  = True                  # INT_BOOL (1)
+
     dirty: bool = False
+
+    components: Dict[str, object] = field(default_factory=dict)
 
 
 #####################################
 # GameObject Subclasses
 ######################################
 
-class NPC(GameObject): ...
-class Item(GameObject): ...
+class Item(GameObject):
+    def __init__(self, id: int, placeable: bool, type: ObjectTypes, name: Optional[str] = None):
+        if name:
+            name = name
+        else:
+            name = f"Item: {id}"
+
+        description = "An item in the game."
+
+        super().__init__(id, name, placeable, type, description)
+
+
+
+
+class NPC(GameObject):
+    pass #TODO: Implement NPC-specific attributes and methods

@@ -61,7 +61,7 @@ class ItemType:
         self.MOUNT = 24                # A mount
 
         # Reverse mappings for easy lookup use: id_to_name[id]
-        self.id_to_name = {v: k for k, v in self.name_to_id.items()}
+        # self.id_to_name = {v: k for k, v in self.name_to_id.items()}
 
 
 # Singletons
@@ -218,7 +218,7 @@ Item:
 - ComponentsRegistry
   - RenderComponent (2)
   - ItemComponent (11)
-  - SkillComponent (9)
+  - ObjectSkill (9)
 
 * Optional
 ** Copy from other NPC
