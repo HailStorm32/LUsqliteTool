@@ -1,0 +1,12 @@
+Directory Structure
+
+Domain/
+    - domains.py  #Contains classes for each table as well as classes for the common objects (NPC(vendor & mission) & item)
+
+Repository/    #Classes responsible for doing all the SQL transactions for each object
+    - item.py
+    - npc.py
+
+Service/
+    - services.py #Contains service classes the GUI will call
+
