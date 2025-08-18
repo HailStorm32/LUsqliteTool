@@ -77,7 +77,7 @@ class Components(IntEnum):
 # ---------- RenderComponent --------------
 @dataclass
 class RenderComponent:
-    object_id:                  int             = INT_32_MAX            # INT32_MAX
+    id:                         int             = INT_32_MAX            # INT32_MAX
     render_asset:               str             = ""                    # TEXT4
     icon_asset:                 str             = ""                    # TEXT4
     icon_id:                    int             = 3964                  # INT32
@@ -128,7 +128,7 @@ class ObjectSkills:
 # ---------- ItemComponent ----------------
 @dataclass
 class ItemComponent:
-    object_id:                  int             = INT_32_MAX            # INT32
+    id:                         int             = INT_32_MAX            # INT32
     equip_location:             EquipLocation   = EquipLocation.CHEST   # TEXT4
     base_value:                 int             = 1000                  # INT32
     is_kit_piece:               bool            = False                 # INT_BOOL (0)
