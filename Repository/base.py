@@ -2,8 +2,8 @@ import sqlite3
 from Domain.domains import *
 from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 
-def _b(x: bool) -> int: return 1 if x else 0
-def _rb(x: Optional[int]) -> bool: return bool(x or 0)
+def _b(x: bool) -> int: return 1 if x else 0 # Convert boolean to int for py -> SQLite
+def _rb(x: Optional[int]) -> bool: return bool(x or 0) # Convert int to boolean for SQLite -> py, treating None as False
 
 class baseRepository:
     def __init__(self, db_file: str):
@@ -97,7 +97,6 @@ class baseRepository:
         finally:
             conn.close()
 
-
     def __load_item_component(self, conn: sqlite3.Connection, object_id: int, component_id: int) -> ItemComponent:
 
         #Ensure there is only one row for the component ID in the ItemComponent table
@@ -159,7 +158,6 @@ class baseRepository:
             sell_multiplier             = row['SellMultiplier'],
         )
 
-
     def __load_render_component(self, conn: sqlite3.Connection, object_id: int, component_id: int) -> RenderComponent:
 
         #Ensure there is only one row for the component ID in the RenderComponent table
@@ -207,7 +205,6 @@ class baseRepository:
             attach_indicators_to_node   = _rb(row['attachIndicatorsToNode']),
         )
 
-
     def __load_skill_component(self, conn: sqlite3.Connection, object_id: int, component_id: int) -> ObjectSkills:
 
         # Typically, the component_id is 0 for ObjectSkills, which means we need to use the object_id for objectTemplate
@@ -245,3 +242,117 @@ class baseRepository:
         return ObjectSkills(
             skills = skill_list,
         )
+
+
+    ############################
+    #-------- SAVE -------------
+    ############################
+
+    def _save_components(self, conn: sqlite3.Connection, object_id: int, components: Dict[str, object]) -> None:
+        """Save components for a given object ID."""
+
+        # Cycle through the components and save them if they are dirty
+        for component_type, component in components.items():
+            if isinstance(component, ItemComponent) and component.dirty:
+                self.__save_item_component(conn, component)
+
+            elif isinstance(component, RenderComponent) and component.dirty:
+                self.__save_render_component(conn, component)
+
+            elif isinstance(component, ObjectSkills) and component.dirty:
+                self.__save_skill_component(conn, component)
+
+            else:
+                print(f"Unknown component type: {component_type}")
+
+        # Ensure the ComponentsRegistry is up-to-date
+        self.__ensure_component_registry(conn, object_id, components)
+
+    def _save_object_table(self, conn: sqlite3.Connection, object: GameObject) -> None:
+        # Make sure only one row exists for the object ID in the Objects table
+        if self.__get_row_count("Objects", object.object_id) > 1:
+            raise DataIntegrityError(f"Multiple rows found for object ID: {object.object_id} in Objects table, cannot save.",
+                                     table="Objects", column="id", value=object.object_id)
+
+        # LU client database lacks UNIQUE constraints, so we need to handle this manually
+        # If the object exists, we update it; otherwise, we insert a new row
+        res = conn.execute("""
+            UPDATE Objects SET
+                name=?, placeable=?, description=?, type=?, localize=?, npcTemplateID=?, displayName=?,
+                interactionDistance=?, nametag=?, _internalNotes=?, locStatus=?, gate_version=?, HQ_valid=?
+            WHERE id=?""", (
+                object.name, object.placeable, object.description, object.type, _b(object.localize), object.npc_template_id,
+                object.display_name, object.interaction_distance, _b(object.nametag), object.internal_notes,
+                object.loc_status, object.gate_version, _b(object.hq_valid), object.object_id
+        ))
+
+        #If no row was updated, INSERT a new one
+        if res.rowcount == 0:
+            conn.execute("""
+                INSERT INTO Objects (
+                    id, name, placeable, description, type, localize, npcTemplateID, displayName,
+                    interactionDistance, nametag, _internalNotes, locStatus, gate_version, HQ_valid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+                    object.object_id, object.name, object.placeable, object.description, object.type, _b(object.localize),
+                    object.npc_template_id, object.display_name, object.interaction_distance, _b(object.nametag),
+                    object.internal_notes, object.loc_status, object.gate_version, _b(object.hq_valid)
+            ))
+
+    def __save_item_component(self, conn: sqlite3.Connection, item_component: ItemComponent) -> None:
+        #TODO
+
+        # Reset dirty flag after saving
+        item_component.dirty = False
+
+    def __save_render_component(self, conn: sqlite3.Connection, render_component: RenderComponent) -> None:
+        #TODO
+
+        # Reset dirty flag after saving
+        render_component.dirty = False
+
+    def __save_skill_component(self, conn: sqlite3.Connection, object_skills: ObjectSkills) -> None:
+        #TODO
+
+        # Reset dirty flag after saving
+        object_skills.dirty = False
+
+    def __ensure_component_registry(self, conn, object_id: int, components: Dict[str, object]) -> None:
+        """Keeps ComponentsRegistry up-to-date."""
+
+        # Delete existing entries so we can rebuild it
+        conn.execute(
+            "DELETE FROM ComponentsRegistry WHERE id=?",
+            (object_id, )
+        )
+
+        # Insert new entries for each component
+        for component_type, component in components.items():
+            if isinstance(component, ItemComponent):
+                conn.execute(
+                    "INSERT INTO ComponentsRegistry (id, component_type, component_id) VALUES (?, ?, ?)",
+                    (object_id, Components.ITEM, component.id)
+                )
+
+            elif isinstance(component, RenderComponent):
+                conn.execute(
+                    "INSERT INTO ComponentsRegistry (id, component_type, component_id) VALUES (?, ?, ?)",
+                    (object_id, Components.RENDER, component.id)
+                )
+
+            elif isinstance(component, ObjectSkills):
+                # Handle if ObjectSkills uses a non zero component ID
+                if component.zero_component_id:
+                    component_id = 0
+                else:
+                    print(f"WARNING: ObjectSkills for object: {object_id} uses non zero component ID in ComponentsRegistry, this is not standard!")
+                    component_id = component.skills[0].skill_id if component.skills else 0
+
+                conn.execute(
+                    "INSERT INTO ComponentsRegistry (id, component_type, component_id) VALUES (?, ?, ?)",
+                    (object_id, Components.SKILL, component_id)
+                )
+            else:
+                print(f"ERROR: Unknown component type: {component_type}")
+
+
+

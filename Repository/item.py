@@ -41,12 +41,24 @@ class ItemRepository(baseRepository):
     ##########################
     #-------- SAVE -----------
     ##########################
-    # def save(self, item: Item) -> None:
-    #     """Save the item to the database."""
-    #     conn = self._conn()
+    def save(self, item: Item) -> None:
+        """Save the item to the database."""
+        conn = self._connect_to_db()
 
-    #     try:
-    #         conn.execute("BEGIN")
+        try:
+            conn.execute("BEGIN")
+
+            #TODO: Implement saving logic for Item
+
+
+            conn.commit()  # Commit the transaction
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
 
 
 

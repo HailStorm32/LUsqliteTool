@@ -10,3 +10,18 @@ Repository/    #Classes responsible for doing all the SQL transactions for each 
 Service/
     - services.py #Contains service classes the GUI will call
 
+
+
+
+
+[ Tkinter widgets ]
+        |
+   (events)
+        v
+[ Service layer ]  <-- enforce rules, orchestrate
+        |
+        v
+[ Repository ]     <-- all SQL lives here
+        |
+        v
+[ SQLite DB ]

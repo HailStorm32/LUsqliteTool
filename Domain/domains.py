@@ -120,8 +120,8 @@ class ObjectSkillRow:
 
 @dataclass
 class ObjectSkills:
-    # object_id:                  int
     skills:                     List[ObjectSkillRow] = field(default_factory=list)
+    zero_component_id:          bool            = True                 # Does this use a zero component ID in the ComponentsRegistry? (Will pretty much always be True)
     dirty:                      bool            = False
 
 #------------------------------------------
