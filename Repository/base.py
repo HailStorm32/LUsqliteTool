@@ -1,5 +1,6 @@
 import sqlite3
 from Domain.domains import *
+from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 
 def _b(x: bool) -> int: return 1 if x else 0
 def _rb(x: Optional[int]) -> bool: return bool(x or 0)
@@ -65,7 +66,8 @@ class baseRepository:
                 object.gate_version          = item_data['gate_version']
                 object.hq_valid              = _rb(item_data['HQ_valid'])
             else:
-                raise KeyError(f"Object data for object id: {object.object_id} not found in Objects table despite it existing previously.")
+                raise NotFoundError(f"Object data for object id: {object.object_id} not found in Objects table despite it existing previously.",
+                                    table="Objects", column="id", value=object.object_id)
 
         finally:
             conn.close()
@@ -78,7 +80,8 @@ class baseRepository:
         ).fetchone()
 
         if not row:
-            raise KeyError(f"ItemComponent with ID: {component_id} not found for object: {object_id}")
+            raise NotFoundError(f"ItemComponent with ID: {component_id} not found for object: {object_id}",
+                                table="ItemComponent", column="id", value=component_id)
 
         return ItemComponent(
             id                          = row['id'],
@@ -133,7 +136,8 @@ class baseRepository:
         ).fetchone()
 
         if not row:
-            raise KeyError(f"RenderComponent ID: {component_id} not found for object: {object_id}")
+            raise NotFoundError(f"RenderComponent with ID: {component_id} not found for object: {object_id}",
+                               table="RenderComponent", column="id", value=component_id)
 
         return RenderComponent(
             id                          = row['id'],
@@ -184,7 +188,8 @@ class baseRepository:
         ).fetchall()
 
         if not rows:
-            raise KeyError(f"ObjectSkills of objectTemplate: {param} not found for object {object_id}")
+            raise NotFoundError(f"ObjectSkills of objectTemplate: {param} not found for object {object_id}",
+                                table="ObjectSkills", column="objectTemplate", value=param)
 
         skill_list = []
 

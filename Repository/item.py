@@ -1,6 +1,7 @@
 import sqlite3
 from Domain.domains import *
 from Repository.base import *
+from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 
 class ItemRepository(baseRepository):
     """Repository for managing items in the database."""
@@ -21,7 +22,7 @@ class ItemRepository(baseRepository):
                     (object_id,)
                 ).fetchone()
             if not base:
-                raise KeyError(f"Item {object_id} not found")
+                raise NotFoundError(f"Item {object_id} not found", table="Objects", column="id", value=object_id)
 
             # Create an Item object with the base data
             item = Item(id=base['id'], name=base['name'], placeable=base['placeable'], type=base['type'])
