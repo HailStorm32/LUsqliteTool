@@ -15,6 +15,23 @@ class baseRepository:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
+    def __get_row_count(self, table: str, value: int, column: str = "id") -> int:
+        """Returns the number of rows in a table where a specific column matches a value"""
+        conn = self._connect_to_db()
+        try:
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {column} = ?",
+                (value,)
+            ).fetchone()[0]
+            return count
+        finally:
+            conn.close()
+
+
+    ############################
+    #-------- LOAD -------------
+    ############################
+
     def _load_components(self, object_id: int) -> Dict[str, object]:
         """Load components for a given object ID."""
         components = {}
@@ -38,6 +55,9 @@ class baseRepository:
                 elif row["component_type"] == Components.SKILL:
                     components["ObjectSkill"] = self.__load_skill_component(conn, object_id, row["component_id"])
 
+            if len(components) == 0:
+                print(f"WARNING: No components found for Object ID: {object_id}")
+
             return components
 
         finally:
@@ -48,6 +68,11 @@ class baseRepository:
         conn = self._connect_to_db()
 
         try:
+            #Ensure there is only one row for the object ID in the Objects table
+            if self.__get_row_count("Objects", object.object_id) > 1:
+                raise DataIntegrityError(f"Multiple rows found for object ID: {object.object_id} in Objects table, cannot load.",
+                                         table="Objects", column="id", value=object.object_id)
+
             # Load all columns from the Objects table
             item_data = conn.execute(
                 "SELECT * FROM Objects WHERE id=?",
@@ -74,6 +99,12 @@ class baseRepository:
 
 
     def __load_item_component(self, conn: sqlite3.Connection, object_id: int, component_id: int) -> ItemComponent:
+
+        #Ensure there is only one row for the component ID in the ItemComponent table
+        if self.__get_row_count("ItemComponent", component_id, "id") > 1:
+            raise DataIntegrityError(f"Multiple rows found for ItemComponent ID: {component_id} for object: {object_id}",
+                                     table="ItemComponent", column="id", value=component_id)
+
         row = conn.execute(
             "SELECT * FROM ItemComponent WHERE id=?",
             (component_id,)
@@ -130,6 +161,12 @@ class baseRepository:
 
 
     def __load_render_component(self, conn: sqlite3.Connection, object_id: int, component_id: int) -> RenderComponent:
+
+        #Ensure there is only one row for the component ID in the RenderComponent table
+        if self.__get_row_count("RenderComponent", component_id, "id") > 1:
+            raise DataIntegrityError(f"Multiple rows found for RenderComponent ID: {component_id} for object: {object_id}",
+                                     table="RenderComponent", column="id", value=component_id)
+
         row = conn.execute(
             "SELECT * FROM RenderComponent WHERE id=?",
             (component_id,)
