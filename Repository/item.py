@@ -54,7 +54,7 @@ class ItemRepository(baseRepository):
                 item.dirty = False
 
             # Save components (dirty check is handled in base class)
-            self._save_components(conn, item.id, item.components)
+            self._save_components(conn, item.object_id, item.components)
 
             conn.commit()  # Commit the transaction
 
