@@ -261,7 +261,7 @@ class baseRepository:
                 self.__save_render_component(conn, component)
 
             elif isinstance(component, ObjectSkills) and component.dirty:
-                self.__save_skill_component(conn, component)
+                self.__save_skill_component(conn, object_id, component)
 
             else:
                 print(f"Unknown component type: {component_type}")

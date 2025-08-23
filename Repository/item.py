@@ -48,8 +48,13 @@ class ItemRepository(baseRepository):
         try:
             conn.execute("BEGIN")
 
-            #TODO: Implement saving logic for Item
+            # Save object table if dirty
+            if item.dirty:
+                self._save_object_table(conn, item)
+                item.dirty = False
 
+            # Save components (dirty check is handled in base class)
+            self._save_components(conn, item.id, item.components)
 
             conn.commit()  # Commit the transaction
 
