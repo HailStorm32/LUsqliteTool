@@ -347,7 +347,7 @@ class baseRepository:
                     reqPrecondition, animationFlag, equipEffects, readyForQA, itemRating, isTwoHanded, minNumRequired, delResIndex,
                     currencyLOT, altCurrencyCost, subItems, audioEventUse, noEquipAnimation, commendationLOT, commendationCost,
                     audioEquipMetaEventSet, currencyCosts, ingredientInfo, locStatus, forgeType, SellMultiplier
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_component.id, item_component.equip_location, item_component.base_value, _b(item_component.is_kit_piece),
