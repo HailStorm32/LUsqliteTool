@@ -122,6 +122,7 @@ class ObjectSkillRow:
 class ObjectSkills:
     skills:                     List[ObjectSkillRow] = field(default_factory=list)
     zero_component_id:          bool            = True                 # Does this use a zero component ID in the ComponentsRegistry? (Will pretty much always be True)
+                                                                       # If the component ID is zero, then it means you need to look up the object ID in the ObjectSkills table
     dirty:                      bool            = False
 
 #------------------------------------------

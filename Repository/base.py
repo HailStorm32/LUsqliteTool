@@ -247,6 +247,7 @@ class baseRepository:
     ############################
     #-------- SAVE -------------
     ############################
+    #Note: save methods are not intended to handle a deletion of a table or row, only insertion or updating of existing rows.
 
     def _save_components(self, conn: sqlite3.Connection, object_id: int, components: Dict[str, object]) -> None:
         """Save components for a given object ID."""
@@ -284,7 +285,8 @@ class baseRepository:
                 object.name, object.placeable, object.description, object.type, _b(object.localize), object.npc_template_id,
                 object.display_name, object.interaction_distance, _b(object.nametag), object.internal_notes,
                 object.loc_status, object.gate_version, _b(object.hq_valid), object.object_id
-        ))
+            )
+        )
 
         #If no row was updated, INSERT a new one
         if res.rowcount == 0:
@@ -296,22 +298,162 @@ class baseRepository:
                     object.object_id, object.name, object.placeable, object.description, object.type, _b(object.localize),
                     object.npc_template_id, object.display_name, object.interaction_distance, _b(object.nametag),
                     object.internal_notes, object.loc_status, object.gate_version, _b(object.hq_valid)
-            ))
+                )
+            )
+
+        # Reset dirty flag after saving
+        object.dirty = False
 
     def __save_item_component(self, conn: sqlite3.Connection, item_component: ItemComponent) -> None:
-        #TODO
+        # Make sure only one row exists for the item_component.id in the ItemComponent table
+        if self.__get_row_count("ItemComponent", item_component.id, "id") > 1:
+            raise DataIntegrityError(
+                f"Multiple rows found for ItemComponent ID: {item_component.id}",
+                table="ItemComponent", column="id", value=item_component.id
+            )
+
+        # LU client database lacks UNIQUE constraints, so we need to handle this manually
+        # If the item exists, we update it; otherwise, we insert a new row
+        res = conn.execute(
+            """
+            UPDATE ItemComponent SET
+            equipLocation=?, baseValue=?, isKitPiece=?, rarity=?, itemType=?, itemInfo=?, inLootTable=?, inVendor=?, isUnique=?, isBOP=?, isBOE=?,
+            reqFlagID=?, reqSpecialtyID=?, reqSpecRank=?, reqAchievementID=?, stackSize=?, color1=?, decal=?, offsetGroupID=?, buildTypes=?,
+            reqPrecondition=?, animationFlag=?, equipEffects=?, readyForQA=?, itemRating=?, isTwoHanded=?, minNumRequired=?, delResIndex=?,
+            currencyLOT=?, altCurrencyCost=?, subItems=?, audioEventUse=?, noEquipAnimation=?, commendationLOT=?, commendationCost=?,
+            audioEquipMetaEventSet=?, currencyCosts=?, ingredientInfo=?, locStatus=?, forgeType=?, SellMultiplier=?
+            WHERE id=? """, (
+                item_component.equip_location, item_component.base_value, _b(item_component.is_kit_piece), item_component.rarity,
+                item_component.item_type, item_component.item_info, _b(item_component.in_loot_table), _b(item_component.in_vendor),
+                _b(item_component.is_unique), _b(item_component.is_bop), _b(item_component.is_boe), item_component.req_flag_id,
+                item_component.req_specialty_id, item_component.req_spec_rank, item_component.req_achievement_id, item_component.stack_size,
+                item_component.color1, item_component.decal, item_component.offset_group_id, item_component.build_types,
+                item_component.req_precondition, item_component.animation_flag, item_component.equip_effects, _b(item_component.ready_for_qa),
+                item_component.item_rating, _b(item_component.is_two_handed), item_component.min_num_required, item_component.del_res_index,
+                item_component.currency_lot, item_component.alt_currency_cost, item_component.sub_items, item_component.audio_event_use,
+                _b(item_component.no_equip_animation), item_component.commendation_lot, item_component.commendation_cost,
+                item_component.audio_equip_meta_event_set, item_component.currency_costs, item_component.ingredient_info,
+                item_component.loc_status, item_component.forge_type, item_component.sell_multiplier, item_component.id
+            )
+        )
+
+        # If no row was updated, insert a new one
+        if res.rowcount == 0:
+            conn.execute(
+                """
+                INSERT INTO ItemComponent (
+                    id, equipLocation, baseValue, isKitPiece, rarity, itemType, itemInfo, inLootTable, inVendor, isUnique, isBOP, isBOE,
+                    reqFlagID, reqSpecialtyID, reqSpecRank, reqAchievementID, stackSize, color1, decal, offsetGroupID, buildTypes,
+                    reqPrecondition, animationFlag, equipEffects, readyForQA, itemRating, isTwoHanded, minNumRequired, delResIndex,
+                    currencyLOT, altCurrencyCost, subItems, audioEventUse, noEquipAnimation, commendationLOT, commendationCost,
+                    audioEquipMetaEventSet, currencyCosts, ingredientInfo, locStatus, forgeType, SellMultiplier
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_component.id, item_component.equip_location, item_component.base_value, _b(item_component.is_kit_piece),
+                    item_component.rarity, item_component.item_type, item_component.item_info, _b(item_component.in_loot_table),
+                    _b(item_component.in_vendor), _b(item_component.is_unique), _b(item_component.is_bop), _b(item_component.is_boe),
+                    item_component.req_flag_id, item_component.req_specialty_id, item_component.req_spec_rank, item_component.req_achievement_id,
+                    item_component.stack_size, item_component.color1, item_component.decal, item_component.offset_group_id,
+                    item_component.build_types, item_component.req_precondition, item_component.animation_flag, item_component.equip_effects,
+                    _b(item_component.ready_for_qa), item_component.item_rating, _b(item_component.is_two_handed), item_component.min_num_required,
+                    item_component.del_res_index, item_component.currency_lot, item_component.alt_currency_cost, item_component.sub_items,
+                    item_component.audio_event_use, _b(item_component.no_equip_animation), item_component.commendation_lot,
+                    item_component.commendation_cost, item_component.audio_equip_meta_event_set, item_component.currency_costs,
+                    item_component.ingredient_info, item_component.loc_status, item_component.forge_type, item_component.sell_multiplier
+                )
+            )
 
         # Reset dirty flag after saving
         item_component.dirty = False
 
     def __save_render_component(self, conn: sqlite3.Connection, render_component: RenderComponent) -> None:
-        #TODO
+        # Make sure only one row exists for the render_component.id in the RenderComponent table
+        if self.__get_row_count("RenderComponent", render_component.id, "id") > 1:
+            raise DataIntegrityError(
+            f"Multiple rows found for RenderComponent ID: {render_component.id}",
+            table="RenderComponent", column="id", value=render_component.id
+            )
+
+        # LU client database lacks UNIQUE constraints, so we need to handle this manually
+        # If the render component exists, we update it; otherwise, we insert a new row
+        res = conn.execute(
+            """
+            UPDATE RenderComponent SET
+            render_asset=?, icon_asset=?, IconID=?, shader_id=?, effect1=?, effect2=?, effect3=?, effect4=?, effect5=?, effect6=?,
+            animationGroupIDs=?, fade=?, usedropshadow=?, preloadAnimations=?, fadeInTime=?, maxShadowDistance=?, ignoreCameraCollision=?,
+            renderComponentLOD1=?, renderComponentLOD2=?, gradualSnap=?, animationFlag=?, AudioMetaEventSet=?, billboardHeight=?,
+            chatBubbleOffset=?, staticBillboard=?, LXFMLFolder=?, attachIndicatorsToNode=?
+            WHERE id=? """, (
+            render_component.render_asset, render_component.icon_asset, render_component.icon_id, render_component.shader_id,
+            render_component.effect1, render_component.effect2, render_component.effect3, render_component.effect4,
+            render_component.effect5, render_component.effect6, render_component.animation_group_ids, _b(render_component.fade),
+            _b(render_component.use_drop_shadow), _b(render_component.preload_animations), render_component.fade_in_time,
+            render_component.max_shadow_distance, _b(render_component.ignore_camera_collision), render_component.render_component_lod1,
+            render_component.render_component_lod2, _b(render_component.gradual_snap), render_component.animation_flag,
+            render_component.audio_meta_event_set, render_component.billboard_height, render_component.chat_bubble_offset,
+            _b(render_component.static_billboard), render_component.lxfml_folder, _b(render_component.attach_indicators_to_node),
+            render_component.id
+            )
+        )
+
+        # If no row was updated, insert a new one
+        if res.rowcount == 0:
+            conn.execute(
+            """
+            INSERT INTO RenderComponent (
+                id, render_asset, icon_asset, IconID, shader_id, effect1, effect2, effect3, effect4, effect5, effect6,
+                animationGroupIDs, fade, usedropshadow, preloadAnimations, fadeInTime, maxShadowDistance, ignoreCameraCollision,
+                renderComponentLOD1, renderComponentLOD2, gradualSnap, animationFlag, AudioMetaEventSet, billboardHeight,
+                chatBubbleOffset, staticBillboard, LXFMLFolder, attachIndicatorsToNode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                render_component.id, render_component.render_asset, render_component.icon_asset, render_component.icon_id,
+                render_component.shader_id, render_component.effect1, render_component.effect2, render_component.effect3,
+                render_component.effect4, render_component.effect5, render_component.effect6, render_component.animation_group_ids,
+                _b(render_component.fade), _b(render_component.use_drop_shadow), _b(render_component.preload_animations),
+                render_component.fade_in_time, render_component.max_shadow_distance, _b(render_component.ignore_camera_collision),
+                render_component.render_component_lod1, render_component.render_component_lod2, _b(render_component.gradual_snap),
+                render_component.animation_flag, render_component.audio_meta_event_set, render_component.billboard_height,
+                render_component.chat_bubble_offset, _b(render_component.static_billboard), render_component.lxfml_folder,
+                _b(render_component.attach_indicators_to_node)
+            )
+            )
 
         # Reset dirty flag after saving
         render_component.dirty = False
 
-    def __save_skill_component(self, conn: sqlite3.Connection, object_skills: ObjectSkills) -> None:
-        #TODO
+    def __save_skill_component(self, conn: sqlite3.Connection, object_id: int, object_skills: ObjectSkills) -> None:
+        # Delete all existing skills for this object ID
+        if object_skills.zero_component_id:
+            conn.execute(
+            "DELETE FROM ObjectSkills WHERE objectTemplate=?",
+            (object_skills.object_id,)
+            )
+        else:
+            print(f"WARNING: Saving ObjectSkills for object: {object_id} using non zero component ID, this is not standard!")
+            for skill in object_skills.skills:
+                # Delete all existing skills for this object ID
+                conn.execute(
+                "DELETE FROM ObjectSkills WHERE objectTemplate=?",
+                (skill.object_Template,)
+                )
+
+        # Insert all current skills
+        for skill_row in object_skills.skills:
+            conn.execute(
+                """
+                INSERT INTO ObjectSkills (
+                objectTemplate, skillID, castOnType, AICombatWeight
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                skill_row.object_Template,
+                skill_row.skill_id,
+                skill_row.cast_on_type,
+                skill_row.ai_combat_weight
+                )
+            )
 
         # Reset dirty flag after saving
         object_skills.dirty = False
@@ -355,4 +497,13 @@ class baseRepository:
                 print(f"ERROR: Unknown component type: {component_type}")
 
 
+    ############################
+    #-------- SAVE -------------
+    ############################
 
+    def _delete_object_skill(self, conn: sqlite3.Connection, object_template: int) -> None:
+        """Delete all skills for a given object template."""
+        conn.execute(
+            "DELETE FROM ObjectSkills WHERE objectTemplate=?",
+            (object_template,)
+        )
