@@ -17,9 +17,12 @@ class ItemsTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
+        # Use a Panedwindow to allow user-resizable sidebar -------------
+        paned = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
+
         # Left sidebar --------------------------------------------------
-        sidebar = ttk.Frame(self, width=200)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar = ttk.Frame(paned, width=220)  # initial width hint
 
         create_btn = ttk.Button(sidebar, text="Create")
         create_btn.pack(padx=5, pady=5, fill=tk.X)
@@ -34,11 +37,14 @@ class ItemsTab(ttk.Frame):
         self.tree.bind("<<TreeviewSelect>>", self._on_item_selected)
 
         # Right content area --------------------------------------------
-        self.detail = ttk.Frame(self)
-        self.detail.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
+        self.detail = ttk.Frame(paned)
         self.detail_label = ttk.Label(self.detail, text="Select an item to view details")
         self.detail_label.pack(padx=10, pady=10, anchor=tk.NW)
+
+        # Add panes after they are populated so initial sizes take effect
+        # Give sidebar a smaller weight so detail area expands more.
+        paned.add(sidebar, weight=1)
+        paned.add(self.detail, weight=4)
 
     # ------------------------------------------------------------------
     def _on_item_selected(self, event: tk.Event) -> None:
