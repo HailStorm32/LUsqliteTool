@@ -9,6 +9,21 @@ class ItemRepository(baseRepository):
     def __init__(self, db_path: str):
         super().__init__(db_path)
 
+
+    def list_item_ids(self, limit: int | None = None) -> list[int]:
+        """Return a list of item IDs from the database, optionally limited in number."""
+        conn = self._connect_to_db()
+        try:
+            query = "SELECT id FROM Objects WHERE type=?"
+            params = (ObjectTypes.ITEM.value,)
+            if limit is not None:
+                query += " LIMIT ?"
+                params += (limit,)
+            rows = conn.execute(query, params).fetchall()
+            return [row['id'] for row in rows]
+        finally:
+            conn.close()
+
     ##########################
     #-------- LOAD -----------
     ##########################
@@ -34,6 +49,11 @@ class ItemRepository(baseRepository):
             self._load_object_table(item)
 
             return item
+
+        except:
+            if conn:
+                conn.close()
+            raise
 
         finally:
             conn.close()

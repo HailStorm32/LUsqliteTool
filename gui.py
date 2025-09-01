@@ -27,12 +27,33 @@ class ItemsTab(ttk.Frame):
         create_btn = ttk.Button(sidebar, text="Create")
         create_btn.pack(padx=5, pady=5, fill=tk.X)
 
-        self.tree = ttk.Treeview(sidebar, show="tree")
-        self.tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Tree + vertical scrollbar container
+        tree_container = ttk.Frame(sidebar)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Example items – in a real app these would come from the service
-        for obj_id in (20007, 2631):
-            self.tree.insert("", tk.END, iid=str(obj_id), text=f"Item {obj_id}")
+        vsb = ttk.Scrollbar(tree_container, orient="vertical")
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.tree = ttk.Treeview(tree_container, show="tree", yscrollcommand=vsb.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.configure(command=self.tree.yview)
+
+        item_ids = self._service.list_item_ids(limit=None)
+
+        # Populate tree with items and their components
+        for item_id in item_ids:
+            # Fetch item details from the service
+            item = self._service.get_item(item_id)
+            if item is None:
+                continue
+            component_children = item.components
+            parent_iid = f"item-{item_id}"
+            # Parent item node (collapsed by default)
+            self.tree.insert("", tk.END, iid=parent_iid, text=f"{item.name} ({item_id})", open=False)
+            # Child component nodes
+            for key in component_children:
+                child_iid = f"{parent_iid}:{key}"
+                self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
 
         self.tree.bind("<<TreeviewSelect>>", self._on_item_selected)
 
@@ -51,7 +72,18 @@ class ItemsTab(ttk.Frame):
         sel = self.tree.selection()
         if not sel:
             return
-        obj_id = int(sel[0])
+        iid = sel[0]
+        # Determine if a child component was selected; derive item iid
+        if ":" in iid:
+            item_part, _ = iid.split(":", 1)
+        else:
+            item_part = iid
+        if not item_part.startswith("item-"):
+            return  # Not an item-related node
+        try:
+            obj_id = int(item_part.split("-", 1)[1])
+        except ValueError:
+            return
         try:
             item = self._service.get_item(obj_id)
             self.detail_label.configure(text=f"ID: {item.object_id}\nName: {item.name}")

@@ -4,6 +4,7 @@ from typing import List
 
 from Domain.domains import Item
 from Repository.item import ItemRepository
+from Repository.exceptions import *
 
 
 class ItemService:
@@ -22,7 +23,32 @@ class ItemService:
     # ------------------------------------------------------------------
     def get_item(self, object_id: int) -> Item:
         """Return a single item from the database."""
-        return self._repo.get(object_id)
+        if object_id <= 0:
+            print(f"Invalid object ID: {object_id}")
+            return None
+
+        try:
+            item = self._repo.get(object_id)
+
+            return item
+
+        except NotFoundError as e:
+            return None
+
+        except Exception as e:
+            print(f"Error retrieving item {object_id}: {e}")
+            return None
+
+    def list_item_ids(self, limit: int | None = None) -> list[int]:
+        """Return a list of item IDs from the database, optionally limited in number."""
+        try:
+           item_list = self._repo.list_item_ids(limit)
+
+        except Exception as e:
+            print(f"Error listing item IDs: {e}")
+            return []
+
+        return item_list
 
     # Future expansion – e.g. listing items or searching – can be added here.
 
