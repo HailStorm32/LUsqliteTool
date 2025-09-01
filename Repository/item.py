@@ -10,17 +10,17 @@ class ItemRepository(baseRepository):
         super().__init__(db_path)
 
 
-    def list_item_ids(self, limit: int | None = None) -> list[int]:
+    def list_items(self, limit: int | None = None) -> list[int]:
         """Return a list of item IDs from the database, optionally limited in number."""
         conn = self._connect_to_db()
         try:
-            query = "SELECT id FROM Objects WHERE type=?"
+            query = "SELECT id,name FROM Objects WHERE type=?"
             params = (ObjectTypes.ITEM.value,)
             if limit is not None:
                 query += " LIMIT ?"
                 params += (limit,)
             rows = conn.execute(query, params).fetchall()
-            return [row['id'] for row in rows]
+            return [{'id':row['id'], 'name':row['name']} for row in rows]
         finally:
             conn.close()
 

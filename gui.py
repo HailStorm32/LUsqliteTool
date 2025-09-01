@@ -38,24 +38,25 @@ class ItemsTab(ttk.Frame):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.configure(command=self.tree.yview)
 
-        item_ids = self._service.list_item_ids(limit=None)
+        item_ids = self._service.list_items(limit=None)
 
-        # Populate tree with items and their components
-        for item_id in item_ids:
-            # Fetch item details from the service
-            item = self._service.get_item(item_id)
-            if item is None:
-                continue
-            component_children = item.components
-            parent_iid = f"item-{item_id}"
+        # Populate tree with items
+        for object in item_ids:
+            parent_iid = f"item-{object['id']}"
             # Parent item node (collapsed by default)
-            self.tree.insert("", tk.END, iid=parent_iid, text=f"{item.name} ({item_id})", open=False)
-            # Child component nodes
-            for key in component_children:
-                child_iid = f"{parent_iid}:{key}"
-                self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
+            try:
+                self.tree.insert("", tk.END, iid=parent_iid, text=f"{object['name']} ({object['id']})", open=False)
+            except tk.TclError as e:
+                # Case to handle 16995 being duplicated in the DB (might need to handle better)
+                print(f"WARNING: duplicate item ID {object['id']}")
+                parent_iid = f"item(1)-{object['id']}"
+                self.tree.insert("", tk.END, iid=parent_iid, text=f"{object['name']} ({object['id']})", open=False)
+
+            # Add dummy child to make expandable
+            self.tree.insert(parent_iid, tk.END, iid=f"{parent_iid}:dummy", text="(loading...)")
 
         self.tree.bind("<<TreeviewSelect>>", self._on_item_selected)
+        self.tree.bind("<<TreeviewOpen>>", self._on_item_expanded)
 
         # Right content area --------------------------------------------
         self.detail = ttk.Frame(paned)
@@ -89,6 +90,47 @@ class ItemsTab(ttk.Frame):
             self.detail_label.configure(text=f"ID: {item.object_id}\nName: {item.name}")
         except Exception as exc:  # pragma: no cover - visual feedback only
             self.detail_label.configure(text=str(exc))
+
+    def _on_item_expanded(self, event: tk.Event) -> None:
+        sel = self.tree.selection()
+
+        parent_iid = sel[0]
+
+        # If there is a dummy child, remove it
+        if self.tree.exists(f"{parent_iid}:dummy"):
+            self.tree.delete(f"{parent_iid}:dummy")
+
+        # If there already are children, do not re-load
+        if self.tree.get_children(parent_iid):
+            #TODO: Might want to refresh instead of ignoring
+            return
+
+        #Parse the item ID from the iid
+        object_id = int(parent_iid.split("-", 1)[1])
+
+        # Fetch item details from the service
+        item = self._service.get_item(object_id)
+        if item is None:
+            print(f"ERROR: could not load item {object_id} for expansion")
+            return
+
+        component_children = item.components
+
+        # Child component nodes
+        for key in component_children:
+            child_iid = f"{parent_iid}:{key}"
+            self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
+
+        # if not sel:
+        #     return
+        # iid = sel[0]
+        # # Determine if a child component was selected; derive item iid
+        # if ":" in iid:
+        #     item_part, _ = iid.split(":", 1)
+        # else:
+        #     item_part = iid
+        # if not item_part.startswith("item-"):
+        #     return
 
 
 class Application:

@@ -39,10 +39,10 @@ class ItemService:
             print(f"Error retrieving item {object_id}: {e}")
             return None
 
-    def list_item_ids(self, limit: int | None = None) -> list[int]:
-        """Return a list of item IDs from the database, optionally limited in number."""
+    def list_items(self, limit: int | None = None) -> list[int]:
+        """Return a list of item IDs and their name from the database, optionally limited in number."""
         try:
-           item_list = self._repo.list_item_ids(limit)
+           item_list = self._repo.list_items(limit)
 
         except Exception as e:
             print(f"Error listing item IDs: {e}")
