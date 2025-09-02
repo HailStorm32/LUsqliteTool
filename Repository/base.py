@@ -254,6 +254,10 @@ class baseRepository:
 
         # Cycle through the components and save them if they are dirty
         for component_type, component in components.items():
+            if component.dirty == False:
+                print(f"DEBUG: Component {component_type} not dirty, skipping save.")
+                continue
+
             if isinstance(component, ItemComponent) and component.dirty:
                 self.__save_item_component(conn, component)
 
