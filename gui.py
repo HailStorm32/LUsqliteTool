@@ -17,6 +17,8 @@ class BaseObjectEntityTab(ttk.Frame):
     def __init__(self, master: tk.Misc):
         super().__init__(master)
 
+        self.object_type = None
+
     # --- abstract methods to be implemented by subclasses ---
     # def _build_form_for(self, component_kind: str) -> None:
     #     raise NotImplementedError()
@@ -24,7 +26,7 @@ class BaseObjectEntityTab(ttk.Frame):
         raise NotImplementedError()
 
     # ------------------------------------------------------------------
-    def _build_form_for(self, component_type: str) -> None:
+    def _build_form_for(self, component_type: str, grandchild_iid: str = None) -> None:
         # Clear existing form widgets
         for w in self.form_container.winfo_children():
             w.destroy()
@@ -38,6 +40,25 @@ class BaseObjectEntityTab(ttk.Frame):
             target_obj = obj  # GameObject fields
             title = f"GameObject: {obj.name} ({obj.object_id})"
             exclude = {"components", "dirty"}
+
+        elif component_type == "ObjectSkill":
+            if grandchild_iid is None:
+                self._show_message("No skill selected")
+                return
+
+            try:
+                skill_id = int(grandchild_iid)
+            except ValueError:
+                self._show_message("Invalid skill ID")
+                return
+
+            target_obj = next((s for s in obj.components.get("ObjectSkill", []).skills if s.skill_id == skill_id), None)
+            if target_obj is None:
+                self._show_message(f"Skill ID {skill_id} not found")
+                return
+            title = f"Skill ID {skill_id} of {obj.object_id}"
+            exclude = {"dirty"}
+
         else:
             target_obj = obj.components.get(component_type)
             if target_obj is None:
@@ -65,8 +86,13 @@ class BaseObjectEntityTab(ttk.Frame):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # if component_kind != ""
+        # Build form fields
 
+        # # Special handling for ObjectSkills component (not a dataclass)
+        # if component_type == "ObjectSkill":
+        #     pass
+
+        # else:
         for row, f in enumerate(fields(target_obj)):
             if f.name in exclude:
                 continue
@@ -101,6 +127,8 @@ class BaseObjectEntityTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _on_list_node_select(self, event: tk.Event) -> None:
+        grandchild_iid = None
+
         sel = self.tree.selection()
         if not sel:
             return
@@ -109,6 +137,10 @@ class BaseObjectEntityTab(ttk.Frame):
         # Determine if a child node was selected; derive component type and/or parent iid
         if ":" in iid: #if a child node
             parent_iid, component_type = iid.split(":", 1) # Split out the object component
+
+            # If there is a grandchild, we nee to split again
+            if iid.count(":") > 1:
+                component_type, grandchild_iid = component_type.split(":", 1)
         else:
             parent_iid = iid
             component_type = "object"
@@ -133,7 +165,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Save current component type then build form
         self.current_component_type = component_type
-        self._build_form_for(component_type)
+        self._build_form_for(component_type, grandchild_iid)
 
     # ------------------------------------------------------------------
     def _on_list_node_expanded(self, event: tk.Event) -> None:
@@ -152,21 +184,27 @@ class BaseObjectEntityTab(ttk.Frame):
             #TODO: Might want to refresh instead of ignoring
             return
 
-        #Parse the item ID from the iid
+        # Parse the object ID from the iid
         object_id = int(parent_iid.split("-", 1)[1])
 
         # Fetch item details from the service
-        item = self._service.get_item(object_id)
-        if item is None:
-            print(f"ERROR: could not load item {object_id} for expansion")
+        obj = self._service.get_item(object_id)
+        if obj is None:
+            print(f"ERROR: could not load object {object_id} for expansion")
             return
 
-        component_children = item.components
+        component_list = obj.components
 
-        # Child component nodes
-        for key in component_children:
+        # Child list nodes (ie components from ComponentRegistry)
+        for key in component_list: # key is component name
             child_iid = f"{parent_iid}:{key}"
             self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
+
+            # Special case – ObjectSkills (has sub children)
+            if key == "ObjectSkill":
+                for skill in component_list[key].skills:
+                    skill_iid = f"{child_iid}:{skill.skill_id}"
+                    self.tree.insert(child_iid, tk.END, iid=skill_iid, text=f"Skill {skill.skill_id}")
 
     # ------------------------------------------------------------------
     def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Item: #TODO: add NPC type hint when implemented
