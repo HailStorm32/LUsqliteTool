@@ -24,26 +24,26 @@ class BaseObjectEntityTab(ttk.Frame):
         raise NotImplementedError()
 
     # ------------------------------------------------------------------
-    def _build_form_for(self, component_kind: str) -> None:
+    def _build_form_for(self, component_type: str) -> None:
         # Clear existing form widgets
         for w in self.form_container.winfo_children():
             w.destroy()
 
-        item = self.current_object
-        if item is None:
-            self._show_message("No item loaded")
+        obj = self.current_object
+        if obj is None:
+            self._show_message("No object loaded")
             return
 
-        if component_kind == "object":
-            target_obj = item  # GameObject fields
-            title = f"GameObject: {item.name} ({item.object_id})"
+        if component_type == "object":
+            target_obj = obj  # GameObject fields
+            title = f"GameObject: {obj.name} ({obj.object_id})"
             exclude = {"components", "dirty"}
         else:
-            target_obj = item.components.get(component_kind)
+            target_obj = obj.components.get(component_type)
             if target_obj is None:
-                self._show_message(f"Component '{component_kind}' not present")
+                self._show_message(f"Component '{component_type}' not present")
                 return
-            title = f"Component '{component_kind}' of {item.object_id}"
+            title = f"Component '{component_type}' of {obj.object_id}"
             exclude = {"dirty"}
 
         self.detail_label.configure(text=title)
@@ -65,7 +65,7 @@ class BaseObjectEntityTab(ttk.Frame):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-        if component_kind != ""
+        # if component_kind != ""
 
         for row, f in enumerate(fields(target_obj)):
             if f.name in exclude:
