@@ -25,3 +25,88 @@ GUI should call the service only. Keeps UI decoupled from storage and lets you c
         |
         v
 [ SQLite DB ]
+
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------
+
+list iid naming:
+
+Parent:
+    parentiid
+
+    ex:
+    [obj_type]-[obj_id]
+
+    item-2345
+
+
+Child:
+    parentiid:childiid
+
+    ex:
+    [parentiid]:[component_name]
+
+    item-2345:RenderComponent
+
+SubChild:
+    parentiid:childiid:subChildiid
+
+    ex:
+    [parentiid]:[childiid]:[id]
+
+    item-345:ObjectSkill:342
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------
+
+"""
+Table Maps
+
+NPC (vendor):
+- Objects
+- ComponentsRegistry
+  - RenderComponent (2)
+  - MinifigComponent (35)
+    - MinifigDecals_Torsos **
+  - PhysicsComponent (3)
+  - InventoryComponent (17)
+  - DestructibleComponent (7) *
+    - LootMatrix
+      - LootTable
+    - CurrencyTable *?
+  - VendorComponent (16)
+    - LootMatrix
+      - LootTable
+  - ScriptComponent (5) *
+
+
+
+NPC (mission):
+- Objects
+- ComponentsRegistry
+  - RenderComponent (2)
+  - MinifigComponent (35)
+    - MinifigDecals_Torsos **
+  - PhysicsComponent (3)
+  - InventoryComponent (17)
+  - DestructibleComponent (7) *
+    - LootMatrix
+      - LootTable
+    - CurrencyTable *?
+  - MissionNPCComponent (73)
+    - Missions
+  - ScriptComponent (5) **
+
+
+Item:
+- Objects
+- ComponentsRegistry
+  - RenderComponent (2)
+  - ItemComponent (11)
+  - ObjectSkill (9)
+
+* Optional
+** Copy from other NPC
+
+"""
