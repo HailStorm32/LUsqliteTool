@@ -38,6 +38,8 @@ class BaseObjectEntityTab(ttk.Frame):
 
         if component_type == "object":
             target_obj = obj  # GameObject fields
+
+            # Set title and component class members to not display
             title = f"GameObject: {obj.name} ({obj.object_id})"
             exclude = {"components", "dirty"}
 
@@ -46,16 +48,27 @@ class BaseObjectEntityTab(ttk.Frame):
                 self._show_message("No skill selected")
                 return
 
+            # Parse skill ID
             try:
                 skill_id = int(grandchild_iid)
             except ValueError:
                 self._show_message("Invalid skill ID")
                 return
 
-            target_obj = next((s for s in obj.components.get("ObjectSkill", []).skills if s.skill_id == skill_id), None)
+            # Find the skill object with the given skill_id
+            object_skill_component = obj.components.get("ObjectSkill", None)
+            target_obj = None
+            if object_skill_component is not None and hasattr(object_skill_component, "skills"):
+                for skill in object_skill_component.skills:
+                    if getattr(skill, "skill_id", None) == skill_id:
+                        target_obj = skill
+                        break
+
             if target_obj is None:
                 self._show_message(f"Skill ID {skill_id} not found")
                 return
+
+            # Set title and component class members to not display
             title = f"Skill ID {skill_id} of {obj.object_id}"
             exclude = {"dirty"}
 
@@ -64,9 +77,11 @@ class BaseObjectEntityTab(ttk.Frame):
             if target_obj is None:
                 self._show_message(f"Component '{component_type}' not present")
                 return
+
+            # Set title and component class members to not display
             title = f"Component '{component_type}' of {obj.object_id}"
             exclude = {"dirty"}
-
+            
         self.detail_label.configure(text=title)
 
         if not is_dataclass(target_obj):
