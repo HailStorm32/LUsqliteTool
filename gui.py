@@ -5,6 +5,7 @@ from tkinter import ttk
 from pathlib import Path
 
 from Service.services import ItemService, NPCService
+from metadata import component_field_metadata
 from dataclasses import fields, is_dataclass
 from typing import Any
 
@@ -27,8 +28,20 @@ class BaseObjectEntityTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _build_form_for(self, component_type: str, grandchild_iid: str = None) -> None:
-        """Build a form for the given component type of the currently loaded object.
-            Responsible for the right-hand detail area where fields are shown and edited."""
+        """Build (or rebuild) the right-hand form for the selected component.
+
+        component_type values:
+            "object"          -> base GameObject fields
+            "RenderComponent" -> any normal component name (must exist in object.components)
+            "ObjectSkill"     -> special case; uses grandchild_iid (skill_id) to select row
+
+        grandchild_iid: for nested collections (currently ObjectSkill rows) the nested id.
+        Uses component_field_metadata for:
+            display_name : override for label text
+            readonly     : disables editing & excluded from save
+            tip          : shown as tooltip on hover
+            advanced     : hidden unless the 'Show advanced' toggle is on
+        """
 
         # Clear existing form widgets
         for w in self.form_container.winfo_children():
@@ -101,8 +114,17 @@ class BaseObjectEntityTab(ttk.Frame):
             self._show_message("Unsupported component type")
             return
 
-        # Store entry widgets for saving
-        self._entry_widgets: list[tuple[str, tk.Variable, Any]] = []
+        # Store entry widgets for saving (name, tk.Variable, py_type, readonly)
+        self._entry_widgets: list[tuple[str, tk.Variable, Any, bool]] = []
+
+    # Resolve metadata key used for lookup into component_field_metadata.
+        if component_type == "object":
+            metadata_key = "GameObject"
+        elif component_type == "ObjectSkill":  # skill row special case already mapped to target_obj
+            metadata_key = "ObjectSkillRow"
+        else:
+            metadata_key = component_type
+        comp_meta = component_field_metadata.get(metadata_key, {})
 
         # Build a scrollable canvas for many fields
         canvas = tk.Canvas(self.form_container, highlightthickness=0)
@@ -117,13 +139,27 @@ class BaseObjectEntityTab(ttk.Frame):
         # Build form fields (labels + entry/checkbutton)
         # Iterate over dataclass fields and create a row for each
         # `row` is used for grid placement so fields appear vertically stacked.
+        # Enumerate dataclass fields and lay them out (skipping excluded & filtered advanced)
         for row, f in enumerate(fields(target_obj)):
             # Skip any fields we explicitly excluded (like internal flags)
             if f.name in exclude:
                 continue
 
-            # Label for the field name on the left
-            ttk.Label(inner, text=f.name).grid(row=row, column=0, sticky=tk.W, padx=2, pady=2)
+            field_meta = comp_meta.get(f.name, {})
+            readonly = bool(field_meta.get("readonly", False))
+            display_name = field_meta.get("display_name") or f.name
+            py_type = field_meta.get("type", f.type)
+            is_advanced = bool(field_meta.get("advanced", False))
+            tip_text = field_meta.get("tip", "")
+
+            # Filter advanced fields unless checkbox is enabled
+            show_adv_var = getattr(self, "show_advanced_var", None)
+            if is_advanced and (show_adv_var is None or not show_adv_var.get()):
+                continue
+
+            # Label for the field name on the left (use display_name if provided)
+            label_widget = ttk.Label(inner, text=display_name)
+            label_widget.grid(row=row, column=0, sticky=tk.W, padx=2, pady=2)
 
             # Read the current value from the target object
             value = getattr(target_obj, f.name)
@@ -137,7 +173,10 @@ class BaseObjectEntityTab(ttk.Frame):
             if isinstance(value, bool):
                 var = tk.BooleanVar(value=value)
                 cb = ttk.Checkbutton(inner, variable=var)
+                if readonly:
+                    cb.state(["disabled"])  # ttk style disable
                 cb.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                widget_for_tooltip = cb
             else:
                 # For non-boolean fields we use a simple text Entry.
                 # If the value looks like an enum (has .name and .value) show the enum name.
@@ -152,14 +191,66 @@ class BaseObjectEntityTab(ttk.Frame):
 
                 var = tk.StringVar(value=display)
                 entry = ttk.Entry(inner, textvariable=var, width=30)
+                if readonly:
+                    entry.configure(state='disabled')
                 entry.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                widget_for_tooltip = entry
 
             # Keep track of the field so the Save handler can apply changes later.
             # We save the declared dataclass field type (f.type) to guide basic coercion.
-            self._entry_widgets.append((f.name, var, f.type))
+            self._entry_widgets.append((f.name, var, py_type, readonly))
+
+            # Attach tooltip to either the input widget (preferred) or the label if there's a tip.
+            if tip_text:
+                self._add_tooltip(widget_for_tooltip, tip_text)
+                # Also allow hovering over label for same info
+                self._add_tooltip(label_widget, tip_text)
 
         # Enable the Save button once there is an editable form
         self.save_button.configure(state=tk.NORMAL)
+
+    # ------------------------------------------------------------------
+    # Tooltip helpers
+    # ------------------------------------------------------------------
+    def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
+        """Attach a simple tooltip to a widget.
+
+        Keeps implementation local & lightweight (no external deps)."""
+        if not text:
+            return
+
+        def show_tip(_event):
+            # Create only one tooltip per widget; store reference on widget
+            if getattr(widget, "_tooltip_win", None):
+                return
+            tw = tk.Toplevel(widget)
+            tw.wm_overrideredirect(True)
+            tw.configure(background="#FFFFE0", padx=4, pady=2, borderwidth=1, relief="solid")
+            label = tk.Label(tw, text=text, justify=tk.LEFT, background="#FFFFE0")
+            label.pack()
+            # Position next to cursor
+            x = widget.winfo_rootx() + 20
+            y = widget.winfo_rooty() + 20
+            tw.wm_geometry(f"+{x}+{y}")
+            widget._tooltip_win = tw  # type: ignore[attr-defined]
+
+        def hide_tip(_event):
+            tw = getattr(widget, "_tooltip_win", None)
+            if tw:
+                try:
+                    tw.destroy()
+                except Exception:
+                    pass
+                widget._tooltip_win = None  # type: ignore[attr-defined]
+
+        widget.bind("<Enter>", show_tip)
+        widget.bind("<Leave>", hide_tip)
+
+    # ------------------------------------------------------------------
+    def _refresh_form(self) -> None:
+        """Rebuild the current form (used when toggling advanced fields)."""
+        if getattr(self, "current_component_type", None):
+            self._build_form_for(self.current_component_type, getattr(self, "_last_grandchild_iid", None))
 
     # ------------------------------------------------------------------
     def _show_message(self, msg: str) -> None:
@@ -208,8 +299,9 @@ class BaseObjectEntityTab(ttk.Frame):
             self._show_message(str(exc))
             return
 
-        # Save current component type then build form
+        # Save current component type then build form (store grandchild for refresh)
         self.current_component_type = component_type
+        self._last_grandchild_iid = grandchild_iid  # store for refresh
         self._build_form_for(component_type, grandchild_iid)
 
     # ------------------------------------------------------------------
@@ -320,6 +412,17 @@ class ItemsTab(BaseObjectEntityTab):
         self.detail_label = ttk.Label(self.detail, text="Select an item or component to edit")
         self.detail_label.pack(padx=10, pady=5, anchor=tk.NW)
 
+        # Advanced field toggle (affects filtering logic in form build)
+        toggle_bar = ttk.Frame(self.detail)
+        toggle_bar.pack(fill=tk.X, padx=10, pady=(0, 5))
+        self.show_advanced_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            toggle_bar,
+            text="Show advanced fields",
+            variable=self.show_advanced_var,
+            command=self._refresh_form
+        ).pack(side=tk.LEFT, anchor=tk.W)
+
         self.form_container = ttk.Frame(self.detail)
         self.form_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
@@ -350,7 +453,9 @@ class ItemsTab(BaseObjectEntityTab):
                 return
 
         # Apply values
-        for name, var, typ in self._entry_widgets:
+        for name, var, typ, readonly in self._entry_widgets:
+            if readonly:
+                continue  # do not attempt to modify readonly fields
             raw = var.get()
             if isinstance(var, tk.BooleanVar):
                 setattr(target_obj, name, bool(raw))
@@ -360,10 +465,12 @@ class ItemsTab(BaseObjectEntityTab):
             else:
                 # Basic type inference
                 try:
-                    if typ in (int, 'int') or (hasattr(typ, '__origin__') and typ.__origin__ is int):
+                    if typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
                         value = int(raw)
                     elif typ in (float, 'float'):
                         value = float(raw)
+                    elif typ in (bool, 'bool'):
+                        value = raw.lower() in {"1", "true", "yes", "on"}
                     else:
                         value = raw
                 except Exception:
