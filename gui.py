@@ -499,6 +499,9 @@ class Application:
         self.db_path = Path(db_path)
         self.root = tk.Tk()
         self.root.title("LU SQLite Tool")
+        # Set a larger initial window size so more fields are visible without resizing.
+        # Width x Height; adjust if you prefer different default dimensions.
+        self.root.geometry("1280x900")
 
         # Services ------------------------------------------------------
         self.item_service = ItemService(self.db_path)
