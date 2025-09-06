@@ -114,30 +114,51 @@ class BaseObjectEntityTab(ttk.Frame):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Build form fields
+        # Build form fields (labels + entry/checkbutton)
+        # Iterate over dataclass fields and create a row for each
+        # `row` is used for grid placement so fields appear vertically stacked.
         for row, f in enumerate(fields(target_obj)):
+            # Skip any fields we explicitly excluded (like internal flags)
             if f.name in exclude:
                 continue
+
+            # Label for the field name on the left
             ttk.Label(inner, text=f.name).grid(row=row, column=0, sticky=tk.W, padx=2, pady=2)
+
+            # Read the current value from the target object
             value = getattr(target_obj, f.name)
+
+            # Prepare a tkinter Variable to hold the editable value for this field.
+            # We store (name, var, type) in self._entry_widgets so _on_save can read
+            # back the values, coerce to the right Python type and persist changes.
             var: tk.Variable
+
+            # Boolean fields get a Checkbutton bound to a BooleanVar
             if isinstance(value, bool):
                 var = tk.BooleanVar(value=value)
                 cb = ttk.Checkbutton(inner, variable=var)
                 cb.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
             else:
-                # Represent enums by their name; fall back to str
+                # For non-boolean fields we use a simple text Entry.
+                # If the value looks like an enum (has .name and .value) show the enum name.
+                # If the value is None show an empty string so the Entry is blank.
                 if hasattr(value, 'name') and hasattr(value, 'value'):
                     display = value.name
                 elif value is None:
                     display = ''
                 else:
+                    # Fallback: convert the value to string for display
                     display = str(value)
+
                 var = tk.StringVar(value=display)
                 entry = ttk.Entry(inner, textvariable=var, width=30)
                 entry.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+
+            # Keep track of the field so the Save handler can apply changes later.
+            # We save the declared dataclass field type (f.type) to guide basic coercion.
             self._entry_widgets.append((f.name, var, f.type))
 
+        # Enable the Save button once there is an editable form
         self.save_button.configure(state=tk.NORMAL)
 
     # ------------------------------------------------------------------
