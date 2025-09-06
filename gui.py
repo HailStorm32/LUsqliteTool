@@ -117,10 +117,10 @@ class BaseObjectEntityTab(ttk.Frame):
         # Store entry widgets for saving (name, tk.Variable, py_type, readonly)
         self._entry_widgets: list[tuple[str, tk.Variable, Any, bool]] = []
 
-    # Resolve metadata key used for lookup into component_field_metadata.
+        # Resolve metadata key used for lookup into component_field_metadata.
         if component_type == "object":
             metadata_key = "GameObject"
-        elif component_type == "ObjectSkill":  # skill row special case already mapped to target_obj
+        elif component_type == "ObjectSkill":
             metadata_key = "ObjectSkillRow"
         else:
             metadata_key = component_type
@@ -200,11 +200,13 @@ class BaseObjectEntityTab(ttk.Frame):
             # We save the declared dataclass field type (f.type) to guide basic coercion.
             self._entry_widgets.append((f.name, var, py_type, readonly))
 
-            # Attach tooltip to either the input widget (preferred) or the label if there's a tip.
+            # If there is a tip, add a small info symbol (ⓘ) next to the field.
+            # Hovering over this symbol shows the tooltip; avoids accidental popups
+            # when just moving across the form.
             if tip_text:
-                self._add_tooltip(widget_for_tooltip, tip_text)
-                # Also allow hovering over label for same info
-                self._add_tooltip(label_widget, tip_text)
+                info_label = ttk.Label(inner, text="ⓘ")  # Unicode info symbol
+                info_label.grid(row=row, column=2, sticky=tk.W, padx=(4, 2), pady=2)
+                self._add_tooltip(info_label, tip_text)
 
         # Enable the Save button once there is an editable form
         self.save_button.configure(state=tk.NORMAL)
