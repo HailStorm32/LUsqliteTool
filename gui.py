@@ -40,7 +40,7 @@ class BaseObjectEntityTab(ttk.Frame):
             target_obj = obj  # GameObject fields
 
             # Set title and component class members to not display
-            title = f"GameObject: {obj.name} ({obj.object_id})"
+            title = f"GameObject: ({obj.object_id}) {obj.name}"
             exclude = {"components", "dirty"}
 
         elif component_type == "ObjectSkill":
@@ -81,7 +81,7 @@ class BaseObjectEntityTab(ttk.Frame):
             # Set title and component class members to not display
             title = f"Component '{component_type}' of {obj.object_id}"
             exclude = {"dirty"}
-            
+
         self.detail_label.configure(text=title)
 
         if not is_dataclass(target_obj):
@@ -271,12 +271,12 @@ class ItemsTab(BaseObjectEntityTab):
             parent_iid = f"item-{item_info['id']}"
             # Parent item node (collapsed by default)
             try:
-                self.tree.insert("", tk.END, iid=parent_iid, text=f"{item_info['name']} ({item_info['id']})", open=False)
+                self.tree.insert("", tk.END, iid=parent_iid, text=f"({item_info['id']}) {item_info['name']}", open=False)
             except tk.TclError as e:
                 # Case to handle 16995 being duplicated in the DB (might need to handle better)
                 print(f"WARNING: duplicate item ID {item_info['id']}")
                 parent_iid = f"item(1)-{item_info['id']}"
-                self.tree.insert("", tk.END, iid=parent_iid, text=f"{item_info['name']} ({item_info['id']})", open=False)
+                self.tree.insert("", tk.END, iid=parent_iid, text=f"({item_info['id']}) {item_info['name']}", open=False)
 
             # Add dummy child to make expandable
             self.tree.insert(parent_iid, tk.END, iid=f"{parent_iid}:dummy", text="(loading...)")
