@@ -27,15 +27,22 @@ class BaseObjectEntityTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _build_form_for(self, component_type: str, grandchild_iid: str = None) -> None:
+        """Build a form for the given component type of the currently loaded object.
+            Responsible for the right-hand detail area where fields are shown and edited."""
+
         # Clear existing form widgets
         for w in self.form_container.winfo_children():
             w.destroy()
 
+        # Get the currently loaded object
         obj = self.current_object
         if obj is None:
             self._show_message("No object loaded")
             return
 
+        ####
+        # Special case: object entity itself
+        ####
         if component_type == "object":
             target_obj = obj  # GameObject fields
 
@@ -43,6 +50,9 @@ class BaseObjectEntityTab(ttk.Frame):
             title = f"GameObject: ({obj.object_id}) {obj.name}"
             exclude = {"components", "dirty"}
 
+        ####
+        # Special case: ObjectSkill component with skill ID sub-selection
+        ####
         elif component_type == "ObjectSkill":
             if grandchild_iid is None:
                 self._show_message("No skill selected")
@@ -72,6 +82,9 @@ class BaseObjectEntityTab(ttk.Frame):
             title = f"Skill ID {skill_id} of {obj.object_id}"
             exclude = {"dirty"}
 
+        ####
+        # General case: other components
+        ####
         else:
             target_obj = obj.components.get(component_type)
             if target_obj is None:
@@ -102,12 +115,6 @@ class BaseObjectEntityTab(ttk.Frame):
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Build form fields
-
-        # # Special handling for ObjectSkills component (not a dataclass)
-        # if component_type == "ObjectSkill":
-        #     pass
-
-        # else:
         for row, f in enumerate(fields(target_obj)):
             if f.name in exclude:
                 continue
@@ -135,6 +142,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _show_message(self, msg: str) -> None:
+        """Clear the form area and show a message."""
         for w in self.form_container.winfo_children():
             w.destroy()
         self.detail_label.configure(text=msg)
@@ -142,6 +150,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _on_list_node_select(self, event: tk.Event) -> None:
+        """Callback when a node in the tree is selected. Loads the relevant object and builds the form."""
         grandchild_iid = None
 
         sel = self.tree.selection()
@@ -184,6 +193,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
     # ------------------------------------------------------------------
     def _on_list_node_expanded(self, event: tk.Event) -> None:
+        """Callback when a node in the tree is expanded. Loads child nodes if needed."""
         sel = self.tree.selection()
         if not sel:
             return
@@ -202,8 +212,8 @@ class BaseObjectEntityTab(ttk.Frame):
         # Parse the object ID from the iid
         object_id = int(parent_iid.split("-", 1)[1])
 
-        # Fetch item details from the service
-        obj = self._service.get_item(object_id)
+        # Fetch object details from the respective service
+        obj = self.__load_relevant_object(parent_iid, object_id)
         if obj is None:
             print(f"ERROR: could not load object {object_id} for expansion")
             return
@@ -306,6 +316,7 @@ class ItemsTab(BaseObjectEntityTab):
 
     # ------------------------------------------------------------------
     def _on_save(self) -> None:
+        """Callback when the Save button is clicked. Persists changes to the currently loaded object."""
         item = self.current_object
         if not item or not self.current_component_type:
             return
