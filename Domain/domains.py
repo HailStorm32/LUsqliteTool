@@ -203,7 +203,7 @@ class GameObject:
 ######################################
 
 class Item(GameObject):
-    def __init__(self, id: int, placeable: bool, type: ObjectTypes, name: Optional[str] = None):
+    def __init__(self, id: int, type: ObjectTypes, name: Optional[str] = None):
         if name:
             name = name
         else:
@@ -211,7 +211,7 @@ class Item(GameObject):
 
         description = "An item in the game."
 
-        super().__init__(id, name, placeable, type, description)
+        super().__init__(id, name, type, description)
 
 
 

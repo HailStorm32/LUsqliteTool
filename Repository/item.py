@@ -33,14 +33,14 @@ class ItemRepository(baseRepository):
 
             # Fetch the required columns from the Objects table to create an Item object
             base = conn.execute(
-                    "SELECT id, name, placeable, type FROM Objects WHERE id=?",
+                    "SELECT id, name, type FROM Objects WHERE id=?",
                     (object_id,)
                 ).fetchone()
             if not base:
                 raise NotFoundError(f"Item {object_id} not found", table="Objects", column="id", value=object_id)
 
             # Create an Item object with the base data
-            item = Item(id=base['id'], name=base['name'], placeable=base['placeable'], type=base['type'])
+            item = Item(id=base['id'], name=base['name'], type=base['type'])
 
             # Load components for the item
             item.components = self._load_components(object_id)

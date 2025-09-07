@@ -80,6 +80,7 @@ class baseRepository:
             ).fetchone()
 
             if item_data:
+                object.placeable             = _rb(item_data['placeable'])
                 object.description           = item_data['description']
                 object.localize              = _rb(item_data['localize'])
                 object.npc_template_id       = item_data['npcTemplateID']
@@ -286,7 +287,7 @@ class baseRepository:
                 name=?, placeable=?, description=?, type=?, localize=?, npcTemplateID=?, displayName=?,
                 interactionDistance=?, nametag=?, _internalNotes=?, locStatus=?, gate_version=?, HQ_valid=?
             WHERE id=?""", (
-                object.name, object.placeable, object.description, object.type, _b(object.localize), object.npc_template_id,
+                object.name, _b(object.placeable), object.description, object.type, _b(object.localize), object.npc_template_id,
                 object.display_name, object.interaction_distance, _b(object.nametag), object.internal_notes,
                 object.loc_status, object.gate_version, _b(object.hq_valid), object.object_id
             )
@@ -299,7 +300,7 @@ class baseRepository:
                     id, name, placeable, description, type, localize, npcTemplateID, displayName,
                     interactionDistance, nametag, _internalNotes, locStatus, gate_version, HQ_valid
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
-                    object.object_id, object.name, object.placeable, object.description, object.type, _b(object.localize),
+                    object.object_id, object.name, _b(object.placeable), object.description, object.type, _b(object.localize),
                     object.npc_template_id, object.display_name, object.interaction_distance, _b(object.nametag),
                     object.internal_notes, object.loc_status, object.gate_version, _b(object.hq_valid)
                 )
