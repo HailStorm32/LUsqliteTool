@@ -30,3 +30,19 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+"""
+TODO:
+- Standardize _on_save method and place in base class
+- Fix save for skills
+- Add search functionality
+   - search by ID
+- Create
+   - new item from scratch
+   - duplicate existing item
+
+
+
+"""
