@@ -26,8 +26,8 @@ class BaseObjectEntityTab(ttk.Frame):
     # --- abstract methods to be implemented by subclasses ---
     # def _build_form_for(self, component_kind: str) -> None:
     #     raise NotImplementedError()
-    def _on_save(self, persist: bool = True) -> None:
-        raise NotImplementedError()
+    # def _on_save(self, persist: bool = True) -> None:
+    #     raise NotImplementedError()
 
     # ------------------------------------------------------------------
     def _build_form_for(self, component_type: str, grandchild_iid: str = None) -> None:
@@ -354,6 +354,107 @@ class BaseObjectEntityTab(ttk.Frame):
                     self.tree.insert(child_iid, tk.END, iid=skill_iid, text=f"Skill {skill.skill_id}")
 
     # ------------------------------------------------------------------
+    def _on_save(self, persist: bool = True) -> None: #TODO: standardize and place in base class
+        """Apply current form values to the in-memory object and optionally persist.
+
+        This method serves BOTH as:
+          * The command behind the "Save" button (default persist=True)
+          * The internal mechanism used to keep edits when navigating between
+            tree nodes (persist=False)
+
+        persist: when True (default) changes are flushed to the DB through the
+            service layer; when False they only update cached objects.
+        """
+        # Identify current object & component
+        obj = getattr(self, 'current_object', None)
+        component_type = getattr(self, 'current_component_type', None)
+        if not obj or not component_type:
+            return
+
+        # Resolve target object to edit
+
+        ####
+        # Special case: object entity itself
+        ####
+        if component_type == 'object':
+            target_obj = obj
+
+        ####
+        # Special case: ObjectSkill component with skill ID sub-selection
+        ####
+        elif component_type == 'ObjectSkill':
+            skill_id_str = getattr(self, '_last_grandchild_iid', None)
+            if not skill_id_str:
+                return
+            try:
+                skill_id = int(skill_id_str)
+            except ValueError:
+                return
+            skill_comp = obj.components.get('ObjectSkill')
+            if not skill_comp or not hasattr(skill_comp, 'skills'):
+                return
+            target_obj = next((row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id), None)
+            if target_obj is None:
+                return
+
+        ####
+        # General case: other components
+        ####
+        else:
+            target_obj = obj.components.get(component_type)
+            if target_obj is None:
+                if persist:
+                    self._show_message('Nothing to save')
+                return
+
+        entry_widgets = getattr(self, '_entry_widgets', [])
+        if not entry_widgets:
+            return
+
+        # Apply widget values to target object
+        for name, var, typ, readonly in entry_widgets:
+            if readonly:
+                continue
+            raw = var.get()
+            if isinstance(var, tk.BooleanVar):
+                setattr(target_obj, name, bool(raw))
+                continue
+            if raw == '':
+                value = None
+            else:
+                try:
+                    if typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
+                        value = int(raw)
+                    elif typ in (float, 'float'):
+                        value = float(raw)
+                    elif typ in (bool, 'bool'):
+                        raise NotImplementedError("Boolean fields should use Checkbutton/BooleanVar")
+                        # value = str(raw).lower() in {"1", "true", "yes", "on"} TODO: Remove?
+                    else:
+                        value = raw
+                except Exception:
+                    value = raw
+            setattr(target_obj, name, value)
+
+        # Mark dirty
+        try:
+            target_obj.dirty = True  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Persist if requested
+        if persist:
+            # Persist changes through the service layer (to save to DB)
+            try:
+                self._service.save_item(obj)
+                self._show_message('Saved successfully')
+            except Exception as exc:  # pragma: no cover
+                self._show_message(f'Error saving: {exc}')
+
+            # Remove from cache so next load is fresh from DB
+            self._object_cache.pop(obj.object_id, None)
+
+    # ------------------------------------------------------------------
     def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Item: #TODO: add NPC type hint when implemented
         """Load the relevant object (Item or NPC) based on the parent iid prefix and object ID."""
 
@@ -472,108 +573,6 @@ class ItemsTab(BaseObjectEntityTab):
         # Give sidebar a smaller weight so detail area expands more.
         paned.add(sidebar, weight=1)
         paned.add(self.detail, weight=4)
-
-    # ------------------------------------------------------------------
-    def _on_save(self, persist: bool = True) -> None: #TODO: standardize and place in base class
-        """Apply current form values to the in-memory object and optionally persist.
-
-        This method serves BOTH as:
-          * The command behind the "Save" button (default persist=True)
-          * The internal mechanism used to keep edits when navigating between
-            tree nodes (persist=False)
-
-        persist: when True (default) changes are flushed to the DB through the
-            service layer; when False they only update cached objects.
-        """
-        # Identify current object & component
-        item = getattr(self, 'current_object', None)
-        component_type = getattr(self, 'current_component_type', None)
-        if not item or not component_type:
-            return
-
-        # Resolve target object to edit
-
-        ####
-        # Special case: object entity itself
-        ####
-        if component_type == 'object':
-            target_obj = item
-
-        ####
-        # Special case: ObjectSkill component with skill ID sub-selection
-        ####
-        elif component_type == 'ObjectSkill':
-            skill_id_str = getattr(self, '_last_grandchild_iid', None)
-            if not skill_id_str:
-                return
-            try:
-                skill_id = int(skill_id_str)
-            except ValueError:
-                return
-            skill_comp = item.components.get('ObjectSkill')
-            if not skill_comp or not hasattr(skill_comp, 'skills'):
-                return
-            target_obj = next((row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id), None)
-            if target_obj is None:
-                return
-
-        ####
-        # General case: other components
-        ####
-        else:
-            target_obj = item.components.get(component_type)
-            if target_obj is None:
-                if persist:
-                    self._show_message('Nothing to save')
-                return
-
-        entry_widgets = getattr(self, '_entry_widgets', [])
-        if not entry_widgets:
-            return
-
-        # Apply widget values to target object
-        for name, var, typ, readonly in entry_widgets:
-            if readonly:
-                continue
-            raw = var.get()
-            if isinstance(var, tk.BooleanVar):
-                setattr(target_obj, name, bool(raw))
-                continue
-            if raw == '':
-                value = None
-            else:
-                try:
-                    if typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
-                        value = int(raw)
-                    elif typ in (float, 'float'):
-                        value = float(raw)
-                    elif typ in (bool, 'bool'):
-                        raise NotImplementedError("Boolean fields should use Checkbutton/BooleanVar")
-                        # value = str(raw).lower() in {"1", "true", "yes", "on"} TODO: Remove?
-                    else:
-                        value = raw
-                except Exception:
-                    value = raw
-            setattr(target_obj, name, value)
-
-        # Mark dirty
-        try:
-            target_obj.dirty = True  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
-        # Persist if requested
-        if persist:
-            # Persist changes through the service layer (to save to DB)
-            try:
-                self._service.save_item(item)
-                self._show_message('Saved successfully')
-            except Exception as exc:  # pragma: no cover
-                self._show_message(f'Error saving: {exc}')
-
-            # Remove from cache so next load is fresh from DB
-            self._object_cache.pop(item.object_id, None)
-
 
 
 class Application:
