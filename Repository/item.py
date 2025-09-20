@@ -10,8 +10,18 @@ class ItemRepository(baseRepository):
         super().__init__(db_path)
 
 
-    def list_items(self, limit: int | None = None) -> list[int]:
-        """Return a list of item IDs from the database, optionally limited in number."""
+    def list_items(self, limit: int | None = None) -> list[dict[str, int | str]]:
+        """
+        Return a list of item IDs from the database, optionally limited in number.
+
+        Ex:
+        [
+            {'id': 20007, 'name': 'Health Potion'},
+            {'id': 20008, 'name': 'Mana Potion'},
+            ...
+        ]
+
+        """
         conn = self._connect_to_db()
         try:
             query = "SELECT id,name FROM Objects WHERE type=?"

@@ -39,8 +39,17 @@ class ItemService:
             print(f"Error retrieving item {object_id}: {e}")
             return None
 
-    def list_items(self, limit: int | None = None) -> list[int]:
-        """Return a list of item IDs and their name from the database, optionally limited in number."""
+    def list_items(self, limit: int | None = None) -> list[dict[str, int | str]]:
+        """
+        Return a list of item IDs and their name from the database, optionally limited in number.
+
+        Ex:
+        [
+            {'id': 20007, 'name': 'Health Potion'},
+            {'id': 20008, 'name': 'Mana Potion'},
+            ...
+        ]
+        """
         try:
            item_list = self._repo.list_items(limit)
 

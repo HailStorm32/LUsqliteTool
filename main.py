@@ -35,13 +35,13 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Standardize _on_save method and place in base class
 - Fix save for skills
 - Add search functionality
    - search by ID
 - Create
    - new item from scratch
    - duplicate existing item
+   - add/remove components to existing item by right-clicking in component list
 
 
 

@@ -35,7 +35,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         component_type values:
             "object"          -> base GameObject fields
-            "RenderComponent" -> any normal component name (must exist in object.components)
+            "   "             -> any normal component name (must exist in object.components)
             "ObjectSkill"     -> special case; uses grandchild_iid (skill_id) to select row
 
         grandchild_iid: for nested collections (currently ObjectSkill rows) the nested id.
@@ -486,6 +486,77 @@ class BaseObjectEntityTab(ttk.Frame):
         """
         self._on_save(persist=False)
 
+    # ------------------------------------------------------------------
+    def _sort_list(
+        self,
+        items: list[dict[str, int | str]] | None,
+        sort_by: str = "auto",
+        reverse: bool = False,
+    ) -> list[dict[str, int | str]]:
+        """Sort a list of dicts returned by the services.
+
+        sort_by: "auto" (default) -> prefer numeric 'id', then case-insensitive 'name',
+                 "id"  -> force sort by numeric id when present (falls back to name/string)
+                 "name"-> force sort by name (case-insensitive) when present (falls back to id/string)
+        """
+        # Normalize inputs: ensure items is a list and sort_by is a lowercase string
+        items = items or []
+        sort_by = (sort_by or "auto").lower()
+
+        # Validate sort_by
+        if sort_by not in {"auto", "id", "name"}:
+            print(f"WARNING: invalid sort_by '{sort_by}' – defaulting to 'auto'")
+            sort_by = "auto"
+
+        def _key(item):
+            """
+            Produce a tuple key for sorting:
+              - First element is a priority group (lower sorts earlier)
+              - Second element is the comparable value for that group
+
+            Groups:
+              0 -> primary preferred value present (e.g. id when sorting by id)
+              1 -> secondary fallback value present (e.g. name when id missing)
+              2 -> generic fallback using str(item)
+              3 -> error case (conversion failed) — sorts last
+            """
+            try:
+                # Prefer dict-style service results (expected shape {'id':..., 'name':...})
+                if isinstance(item, dict):
+                    if sort_by == "id":
+                        # Prefer numeric id ordering when available
+                        if "id" in item:
+                            return (0, int(item["id"]))
+                        # Fall back to name if id missing
+                        if "name" in item:
+                            return (1, str(item["name"]).lower())
+                        # Neither id nor name present — stringify as fallback
+                        return (2, str(item))
+
+                    if sort_by == "name":
+                        # Prefer case-insensitive name ordering when available
+                        if "name" in item:
+                            return (0, str(item["name"]).lower())
+                        # Fall back to numeric id if name missing
+                        if "id" in item:
+                            return (1, int(item["id"]))
+                        return (2, str(item))
+
+                    # auto: prefer id first, then name
+                    if "id" in item:
+                        return (0, int(item["id"]))
+                    if "name" in item:
+                        return (1, str(item["name"]).lower())
+
+                # Non-dict items: use string representation as a neutral fallback
+                return (2, str(item))
+
+            except Exception:
+                # If conversion fails (e.g. int() on bad data), push to end but still compare by string
+                return (3, str(item))
+
+        return sorted(items, key=_key, reverse=reverse)
+
 
 class ItemsTab(BaseObjectEntityTab):
     """Tab containing item related widgets."""
@@ -518,7 +589,11 @@ class ItemsTab(BaseObjectEntityTab):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.configure(command=self.tree.yview)
 
+        # Load item IDs from the service
         item_ids = self._service.list_items(limit=None)
+
+        # Sort by ID ascending
+        item_ids = self._sort_list(item_ids, sort_by="id", reverse=False)
 
         # Populate tree with items
         for item_info in item_ids:

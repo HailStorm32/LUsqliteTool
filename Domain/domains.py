@@ -178,6 +178,12 @@ class ItemComponent:
 # -------- GameObject (Objects)------------
 @dataclass
 class GameObject:
+    def __init__(self, id: int, name: str, type: ObjectTypes, description: str):
+        self.object_id = id
+        self.name = name
+        self.type = type
+        self.description = description
+
     object_id:                  int             = INT_32_MAX            # INT32
     name:                       str             = PLACEHOLDER_TEXT      # TEXT4
     placeable:                  bool            = False                 # INT_BOOL (0)
