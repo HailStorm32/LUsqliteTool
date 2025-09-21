@@ -23,6 +23,13 @@ class BaseObjectEntityTab(ttk.Frame):
         # remain when navigating away and back without saving to DB yet.
         self._object_cache: dict[int, Any] = {}
 
+        # Generic list (left pane) sorting state and data cache
+        # Subclasses should provide data via _load_list_data(); base will sort/build UI.
+        self.sort_by_var = tk.StringVar(value="id")      # 'id' or 'name'
+        self.sort_desc_var = tk.BooleanVar(value=False)    # False=ascending, True=descending
+        self._list_data: list[dict[str, int | str]] = []   # cached rows for left tree
+        self.tree_prefix: str = ""  # e.g., 'item' or 'npc' – subclasses set this
+
     # --- abstract methods to be implemented by subclasses ---
     # def _build_form_for(self, component_kind: str) -> None:
     #     raise NotImplementedError()
@@ -508,7 +515,7 @@ class BaseObjectEntityTab(ttk.Frame):
             print(f"WARNING: invalid sort_by '{sort_by}' – defaulting to 'auto'")
             sort_by = "auto"
 
-        def _key(item):
+        def _key(obj):
             """
             Produce a tuple key for sorting:
               - First element is a priority group (lower sorts earlier)
@@ -522,40 +529,171 @@ class BaseObjectEntityTab(ttk.Frame):
             """
             try:
                 # Prefer dict-style service results (expected shape {'id':..., 'name':...})
-                if isinstance(item, dict):
+                if isinstance(obj, dict):
                     if sort_by == "id":
                         # Prefer numeric id ordering when available
-                        if "id" in item:
-                            return (0, int(item["id"]))
+                        if "id" in obj:
+                            return (0, int(obj["id"]))
                         # Fall back to name if id missing
-                        if "name" in item:
-                            return (1, str(item["name"]).lower())
+                        if "name" in obj:
+                            return (1, str(obj["name"]).lower())
                         # Neither id nor name present — stringify as fallback
-                        return (2, str(item))
+                        return (2, str(obj))
 
                     if sort_by == "name":
                         # Prefer case-insensitive name ordering when available
-                        if "name" in item:
-                            return (0, str(item["name"]).lower())
+                        if "name" in obj:
+                            return (0, str(obj["name"]).lower())
                         # Fall back to numeric id if name missing
-                        if "id" in item:
-                            return (1, int(item["id"]))
-                        return (2, str(item))
+                        if "id" in obj:
+                            return (1, int(obj["id"]))
+                        return (2, str(obj))
 
                     # auto: prefer id first, then name
-                    if "id" in item:
-                        return (0, int(item["id"]))
-                    if "name" in item:
-                        return (1, str(item["name"]).lower())
+                    if "id" in obj:
+                        return (0, int(obj["id"]))
+                    if "name" in obj:
+                        return (1, str(obj["name"]).lower())
 
                 # Non-dict items: use string representation as a neutral fallback
-                return (2, str(item))
+                return (2, str(obj))
 
             except Exception:
                 # If conversion fails (e.g. int() on bad data), push to end but still compare by string
-                return (3, str(item))
+                return (3, str(obj))
 
         return sorted(items, key=_key, reverse=reverse)
+
+    # ------------------------------------------------------------------
+    # Generic left-pane list rebuilding (shared by tabs)
+    # ------------------------------------------------------------------
+    def _build_sort_bar(self, parent: tk.Misc) -> None:
+        """Build a reusable sort controls bar (Sort by + Descending).
+
+        Subclasses should call this when constructing their left sidebar.
+        It binds controls to _rebuild_list_tree so changes take effect immediately.
+        """
+        sort_bar = ttk.Frame(parent)
+        sort_bar.pack(fill=tk.X, padx=5, pady=(0, 5))
+        ttk.Label(sort_bar, text="Sort by:").pack(side=tk.LEFT)
+        sort_combo = ttk.Combobox(
+            sort_bar,
+            state="readonly",
+            values=("id", "name"),
+            textvariable=self.sort_by_var,
+            width=8,
+        )
+        sort_combo.pack(side=tk.LEFT, padx=(4, 8))
+        sort_combo.bind("<<ComboboxSelected>>", lambda _e: self._rebuild_list_tree())
+        ttk.Checkbutton(
+            sort_bar,
+            text="Descending",
+            variable=self.sort_desc_var,
+            command=self._rebuild_list_tree,
+        ).pack(side=tk.LEFT)
+
+    def _load_list_data(self) -> list[dict[str, int | str]]:
+        """Hook for subclasses to fetch list rows for the left tree.
+
+        Each row should at minimum include keys 'id' (int/str) and 'name' (str) so
+        the base renderer can build labels and stable iids.
+
+        Subclasses must override.
+        """
+        raise NotImplementedError()
+
+    def _format_node_text(self, info: dict[str, Any]) -> str:
+        """Format the display text for a root node in the left tree.
+
+        Default: "(<id>) <name>".
+
+        Subclasses can override for custom labels.
+        """
+        return f"({info.get('id', '?')}) {info.get('name', '')}"
+
+    def _make_root_iid(self, id_val: int | str) -> str:
+        """Construct a unique-ish Treeview iid for a root node.
+
+        Uses self.tree_prefix if set, defaulting to 'node'.
+        """
+        prefix = self.tree_prefix or "node"
+        return f"{prefix}-{id_val}"
+
+    def _make_root_iid_alt(self, id_val: int | str) -> str:
+        """Alternate iid if the primary collides (e.g., duplicate ids in data)."""
+        prefix = self.tree_prefix or "node"
+        return f"{prefix}(1)-{id_val}"
+
+    def _rebuild_list_tree(self) -> None:
+        """Rebuild the left tree according to current sort settings (generic).
+
+        Requires: self.tree (Treeview) to be created by subclass UI setup.
+        Will lazy-load _list_data via _load_list_data if empty.
+        Preserves selection by object id when possible.
+        """
+        if not hasattr(self, 'tree'):
+            return
+
+        # Lazy load list data once
+        if not self._list_data:
+            try:
+                self._list_data = self._load_list_data() or []
+            except Exception as exc:
+                print(f"ERROR loading list data: {exc}")
+                self._list_data = []
+
+        # Try to preserve current selection by parsing the id from the label text
+        selected_obj_id: int | None = None
+        sel = self.tree.selection()
+        if sel:
+            sel_iid = sel[0]
+            parent_iid = sel_iid.split(":", 1)[0]
+            try:
+                text = self.tree.item(parent_iid, "text")
+                if isinstance(text, str) and text.startswith("("):
+                    end = text.find(")")
+                    if end > 1:
+                        selected_obj_id = int(text[1:end])
+            except Exception:
+                selected_obj_id = None
+
+        # Clear existing root nodes
+        for child in self.tree.get_children(""):
+            self.tree.delete(child)
+
+        # Sort and rebuild
+        sort_by = (self.sort_by_var.get() or "id").lower()
+        reverse = bool(self.sort_desc_var.get())
+        sorted_objs = self._sort_list(self._list_data, sort_by=sort_by, reverse=reverse)
+
+        for info in sorted_objs:
+            object_id = info.get('id')
+            if object_id is None:
+                continue
+            parent_iid = self._make_root_iid(object_id)
+            text = self._format_node_text(info)
+            try:
+                self.tree.insert("", tk.END, iid=parent_iid, text=text, open=False)
+            except tk.TclError:
+                # Collision (duplicate iid). Use alternate iid variant.
+                parent_iid = self._make_root_iid_alt(object_id)
+                self.tree.insert("", tk.END, iid=parent_iid, text=text, open=False)
+            # Add dummy child to make expandable
+            self.tree.insert(parent_iid, tk.END, iid=f"{parent_iid}:dummy", text="(loading...)")
+
+        # Restore selection if possible
+        if selected_obj_id is not None:
+            pattern = f"({selected_obj_id}) "
+            for node in self.tree.get_children(""):
+                text = self.tree.item(node, "text")
+                if isinstance(text, str) and text.startswith(pattern):
+                    try:
+                        self.tree.selection_set(node)
+                        self.tree.focus(node)
+                        self.tree.see(node)
+                    except Exception:
+                        pass
+                    break
 
 
 class ItemsTab(BaseObjectEntityTab):
@@ -564,7 +702,13 @@ class ItemsTab(BaseObjectEntityTab):
     def __init__(self, master: tk.Misc, service: ItemService):
         super().__init__(master)
         self._service = service
+        # Identify root node prefix for generic tree helpers
+        self.tree_prefix = "item"
         self._build_widgets()
+
+    # Provide data to the base list builder
+    def _load_list_data(self) -> list[dict[str, int | str]]:
+        return self._service.list_items(limit=None)
 
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
@@ -577,6 +721,8 @@ class ItemsTab(BaseObjectEntityTab):
 
         create_btn = ttk.Button(sidebar, text="Create")
         create_btn.pack(padx=5, pady=5, fill=tk.X)
+        # Sort controls (provided by base)
+        self._build_sort_bar(sidebar)
 
         # Tree + vertical scrollbar container
         tree_container = ttk.Frame(sidebar)
@@ -589,26 +735,8 @@ class ItemsTab(BaseObjectEntityTab):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.configure(command=self.tree.yview)
 
-        # Load item IDs from the service
-        item_ids = self._service.list_items(limit=None)
-
-        # Sort by ID ascending
-        item_ids = self._sort_list(item_ids, sort_by="id", reverse=False)
-
-        # Populate tree with items
-        for item_info in item_ids:
-            parent_iid = f"item-{item_info['id']}"
-            # Parent item node (collapsed by default)
-            try:
-                self.tree.insert("", tk.END, iid=parent_iid, text=f"({item_info['id']}) {item_info['name']}", open=False)
-            except tk.TclError as e:
-                # Case to handle 16995 being duplicated in the DB (might need to handle better)
-                print(f"WARNING: duplicate item ID {item_info['id']}")
-                parent_iid = f"item(1)-{item_info['id']}"
-                self.tree.insert("", tk.END, iid=parent_iid, text=f"({item_info['id']}) {item_info['name']}", open=False)
-
-            # Add dummy child to make expandable
-            self.tree.insert(parent_iid, tk.END, iid=f"{parent_iid}:dummy", text="(loading...)")
+        # Build the tree according to current sort settings
+        self._rebuild_list_tree()
 
         self.tree.bind("<<TreeviewSelect>>", self._on_list_node_select)
         self.tree.bind("<<TreeviewOpen>>", self._on_list_node_expanded)
@@ -648,6 +776,8 @@ class ItemsTab(BaseObjectEntityTab):
         # Give sidebar a smaller weight so detail area expands more.
         paned.add(sidebar, weight=1)
         paned.add(self.detail, weight=4)
+
+    # (tree rebuild now handled by BaseObjectEntityTab._rebuild_list_tree)
 
 
 class Application:
