@@ -433,7 +433,7 @@ class baseRepository:
         if object_skills.zero_component_id:
             conn.execute(
             "DELETE FROM ObjectSkills WHERE objectTemplate=?",
-            (object_skills.object_id,)
+            (object_id,)
             )
         else:
             print(f"WARNING: Saving ObjectSkills for object: {object_id} using non zero component ID, this is not standard!")

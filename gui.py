@@ -361,7 +361,7 @@ class BaseObjectEntityTab(ttk.Frame):
                     self.tree.insert(child_iid, tk.END, iid=skill_iid, text=f"Skill {skill.skill_id}")
 
     # ------------------------------------------------------------------
-    def _on_save(self, persist: bool = True) -> None: #TODO: standardize and place in base class
+    def _on_save(self, persist: bool = True) -> None:
         """Apply current form values to the in-memory object and optionally persist.
 
         This method serves BOTH as:
@@ -445,7 +445,11 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Mark dirty
         try:
-            target_obj.dirty = True  # type: ignore[attr-defined]
+            #TODO: for skills, mark both skill row and ObjectSkill component dirty
+            if component_type == 'ObjectSkill':
+                target_obj.dirty = True
+                obj.components['ObjectSkill'].dirty = True
+            target_obj.dirty = True
         except Exception:
             pass
 
