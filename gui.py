@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from pathlib import Path
 
 from Service.services import ItemService, NPCService
@@ -403,6 +403,31 @@ class BaseObjectEntityTab(ttk.Frame):
             target_obj = next((row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id), None)
             if target_obj is None:
                 return
+            # Track the original skill id so we can rename the left tree node if it changes
+            original_skill_id = getattr(target_obj, 'skill_id', None)
+
+            # Duplicate-prevention: read the prospective new id from the form and block if it already exists
+            try:
+                var_skill = next((v for (n, v, _t, ro) in getattr(self, '_entry_widgets', []) if n == 'skill_id' and not ro), None)
+            except Exception:
+                var_skill = None
+            if var_skill is not None:
+                try:
+                    new_proposed_id = int(var_skill.get())
+                except Exception:
+                    new_proposed_id = original_skill_id
+                if isinstance(new_proposed_id, int) and new_proposed_id != original_skill_id:
+                    if any((row is not target_obj) and getattr(row, 'skill_id', None) == new_proposed_id for row in getattr(skill_comp, 'skills', [])):
+                        try:
+                            messagebox.showerror("Duplicate Skill ID", f"Skill ID {new_proposed_id} already exists for this object.")
+                        except Exception:
+                            pass
+                        # Reset entry back to original and abort save (no changes applied)
+                        try:
+                            var_skill.set(str(original_skill_id))
+                        except Exception:
+                            pass
+                        return
 
         ####
         # General case: other components
@@ -464,6 +489,87 @@ class BaseObjectEntityTab(ttk.Frame):
 
             # Remove from cache so next load is fresh from DB
             self._object_cache.pop(obj.object_id, None)
+
+
+        ##################################
+        ### Ensure left tree is in sync with any changes
+        #################################
+
+        # Keep left list in sync when a skill's skill_id is changed: update node iid/text and our refresh context
+        if component_type == 'ObjectSkill':
+            try:
+                new_skill_id = getattr(target_obj, 'skill_id', None)
+                if (
+                    'original_skill_id' in locals()
+                    and isinstance(original_skill_id, int)
+                    and isinstance(new_skill_id, int)
+                    and original_skill_id != new_skill_id
+                ):
+                    # Find the correct parent skill iid (handle both normal and alternate root iids)
+                    candidates = [self._make_root_iid(obj.object_id), self._make_root_iid_alt(obj.object_id)]
+                    old_iid = None
+                    parent_skill_iid = None
+                    for root in candidates:
+                        cand_parent = f"{root}:ObjectSkill"
+                        cand_old = f"{cand_parent}:{original_skill_id}"
+                        if self.tree.exists(cand_old):
+                            old_iid = cand_old
+                            parent_skill_iid = cand_parent
+                            break
+                    # Fallback: try current selection
+                    if old_iid is None:
+                        sel = self.tree.selection()
+                        if sel and self.tree.exists(sel[0]) and sel[0].count(":") == 2:
+                            old_iid = sel[0]
+                            parent_skill_iid = old_iid.rsplit(":", 1)[0]
+                    if old_iid is None or parent_skill_iid is None:
+                        # No visible node to rename; nothing to do
+                        raise RuntimeError("Skill node not found for rename")
+
+                    new_iid = f"{parent_skill_iid}:{new_skill_id}"
+                    if self.tree.exists(new_iid):
+                        # If target already exists, delete old and switch selection
+                        try:
+                            self.tree.delete(old_iid)
+                        except Exception:
+                            pass
+                        self.tree.item(new_iid, text=f"Skill {new_skill_id}")
+                        self.tree.selection_set(new_iid)
+                        self.tree.focus(new_iid)
+                    else:
+                        # Insert replacement at same index, then remove old
+                        try:
+                            idx = self.tree.index(old_iid)
+                        except Exception:
+                            idx = tk.END
+                        self.tree.insert(parent_skill_iid, idx, iid=new_iid, text=f"Skill {new_skill_id}")
+                        try:
+                            self.tree.delete(old_iid)
+                        except Exception:
+                            pass
+                        self.tree.selection_set(new_iid)
+                        self.tree.focus(new_iid)
+                    # Update context for future form refreshes
+                    self._last_grandchild_iid = str(new_skill_id)
+            except Exception:
+                # Best-effort label update if anything above fails
+                try:
+                    sel = self.tree.selection()
+                    if sel:
+                        self.tree.item(sel[0], text=f"Skill {getattr(target_obj, 'skill_id', '')}")
+                except Exception:
+                    pass
+
+        # If editing the base object, update the root node label to reflect a name change
+        if component_type == 'object':
+            try:
+                root_iid = self._make_root_iid(obj.object_id)
+                if not self.tree.exists(root_iid):
+                    root_iid = self._make_root_iid_alt(obj.object_id)
+                if self.tree.exists(root_iid):
+                    self.tree.item(root_iid, text=self._format_node_text({'id': obj.object_id, 'name': obj.name}))
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Item: #TODO: add NPC type hint when implemented
