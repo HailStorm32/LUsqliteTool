@@ -14,7 +14,7 @@ component_field_metadata = {
         "base_value":                 { "tip": "Base vendor value (placeholder)",    "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": False   },
         "is_kit_piece":               { "tip": "Part of a kit?",                     "display_name": "",     "type": bool,       "min": None,    "max": None,           "readonly": False,  "advanced": False   },
         "rarity":                     { "tip": "Rarity tier (placeholder)",          "display_name": "",     "type": int,        "min": 0,       "max": 10,             "readonly": False,  "advanced": False   },
-        "item_type":                  { "tip": "Item type (enum)",                   "display_name": "",     "type": str,        "min": None,    "max": None,           "readonly": False,  "advanced": False   },
+        "item_type":                  { "tip": "Item type",                          "display_name": "",     "type": int,        "min": None,    "max": None,           "readonly": False,  "advanced": False   },
         "item_info":                  { "tip": "Opaque item info id",                "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    },
 
         # Availability flags
