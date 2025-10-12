@@ -125,7 +125,7 @@ component_field_metadata = {
         "object_id":              { "tip": "Primary object / template id",              "display_name": "",     "type": int,        "min": 1,         "max": INT_32_MAX,    "readonly": True,   "advanced": False },
         "name":                   { "tip": "Internal name",                             "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": False,  "advanced": False },
         "placeable":              { "tip": "Can be placed in world",                    "display_name": "",     "type": bool,       "min": None,      "max": None,          "readonly": False,  "advanced": False },
-        "type":                   { "tip": "High-level object type enum",               "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": False,  "advanced": False },
+        "type":                   { "tip": "High-level object type enum",               "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": True,   "advanced": False },
         "description":            { "tip": "Player-facing description",                 "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": False,  "advanced": False },
         "localize":               { "tip": "Should be localized",                       "display_name": "",     "type": bool,       "min": None,      "max": None,          "readonly": False,  "advanced": True  },
         "npc_template_id":        { "tip": "Associated NPC template id",                "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": True  },

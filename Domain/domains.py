@@ -6,6 +6,8 @@ from typing import List, Dict, Optional
 # Types and Constants
 #####################################
 INT_32_MAX = 2_147_483_647  # Maximum value for a 32-bit signed integer
+INT_32_MIN = -2_147_483_648 # Minimum value for a 32-bit signed integer
+INT_NULL = INT_32_MIN       # Representation of NULL for INT32 fields
 PLACEHOLDER_TEXT = "Placeholder String"
 
 class NPCProfession(IntEnum):
@@ -14,6 +16,7 @@ class NPCProfession(IntEnum):
 
 class ItemType(IntEnum):
     UNKNOWN             = -1   # An unknown item type
+    NONE                = INT_NULL  # No item type
     BRICK               = 1    # A brick
     HAT                 = 2    # A hat / head item
     HAIR                = 3    # A hair item
@@ -40,6 +43,7 @@ class ItemType(IntEnum):
     MOUNT               = 24   # A mount
 
 class EquipLocation(StrEnum):
+    NONE                = "NULL"
     HAIR                = "hair"
     HEAD                = "head"
     NECK                = "clavicle"

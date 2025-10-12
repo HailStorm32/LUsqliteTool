@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+from enum import Enum, IntEnum, StrEnum
 from pathlib import Path
 
 from Service.services import ItemService, NPCService
@@ -162,7 +163,11 @@ class BaseObjectEntityTab(ttk.Frame):
             field_meta = comp_meta.get(f.name, {})
             readonly = bool(field_meta.get("readonly", False))
             display_name = field_meta.get("display_name") or f.name
-            py_type = field_meta.get("type", f.type)
+            # Prefer the declared dataclass type; if it's an Enum subclass, don't let metadata override it
+            declared_type = f.type
+            py_type = field_meta.get("type", declared_type)
+            if isinstance(declared_type, type) and issubclass(declared_type, Enum):
+                py_type = declared_type
             is_advanced = bool(field_meta.get("advanced", False))
             tip_text = field_meta.get("tip", "")
 
@@ -191,6 +196,51 @@ class BaseObjectEntityTab(ttk.Frame):
                     cb.state(["disabled"])  # ttk style disable
                 cb.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                 widget_for_tooltip = cb
+            elif (
+                isinstance(value, Enum)
+                or (isinstance(py_type, type) and issubclass(py_type, Enum))
+                or (isinstance(declared_type, type) and issubclass(declared_type, Enum))
+            ):
+                # Enum fields -> use a readonly Combobox with enum member names
+                if isinstance(value, Enum):
+                    enum_type = value.__class__
+                elif isinstance(py_type, type) and issubclass(py_type, Enum):
+                    enum_type = py_type
+                else:
+                    enum_type = declared_type
+                # Filter out UNKNOWN/INVALID-like options and prepare display labels
+                excluded = {"UNKNOWN", "INVALID"}
+                included_members = [m for m in enum_type if m.name.upper() not in excluded]
+                is_int_enum = False
+                try:
+                    is_int_enum = issubclass(enum_type, IntEnum)
+                except Exception:
+                    is_int_enum = False
+
+                def _display_label(m: Enum) -> str:
+                    if is_int_enum and m.name.upper() != 'NONE':
+                        return f"({m.value}){m.name}"
+                    return m.name
+
+                options = [_display_label(m) for m in included_members]
+
+                # Resolve current value to an enum member without using exceptions for control flow
+                current_member = self._resolve_enum_member(enum_type, value)
+
+                # Determine display for current value
+                if current_member is not None and current_member in included_members:
+                    display = _display_label(current_member)
+                elif current_member is None and any(m.name.upper() == 'NONE' for m in included_members):
+                    display = 'NONE'
+                else:
+                    display = ''
+
+                var = tk.StringVar(value=display)
+                combo = ttk.Combobox(inner, state='readonly', values=options, textvariable=var, width=28)
+                if readonly:
+                    combo.configure(state='disabled')
+                combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                widget_for_tooltip = combo
             else:
                 # For non-boolean fields we use a simple text Entry.
                 # If the value looks like an enum (has .name and .value) show the enum name.
@@ -267,6 +317,58 @@ class BaseObjectEntityTab(ttk.Frame):
 
         widget.bind("<Enter>", show_tip)
         widget.bind("<Leave>", hide_tip)
+
+    # ------------------------------------------------------------------
+    # Enum resolution helpers (avoid exceptions for control flow)
+    # ------------------------------------------------------------------
+    def _resolve_enum_member(self, enum_type: type[Enum], value: Any) -> Enum | None:
+        """Map a raw value (int/str/Enum) to an enum member without raising.
+
+        - If already an Enum of the target type, return it.
+        - If value is int-like and enum is IntEnum, match by .value.
+        - If value is str and a member name exists, match by name.
+        - If value is str and enum is StrEnum and a member with that value exists, match by .value.
+        Returns None if no match.
+        """
+        # Already the right enum
+        if isinstance(value, enum_type):
+            return value
+        # Try int-like for IntEnum
+        try:
+            if issubclass(enum_type, IntEnum):
+                if isinstance(value, (int,)):
+                    for m in enum_type:
+                        if m.value == value:
+                            return m
+                # numeric string case
+                if isinstance(value, str) and value.isdigit():
+                    iv = int(value)
+                    for m in enum_type:
+                        if m.value == iv:
+                            return m
+        except Exception:
+            pass
+        # Try name lookup
+        if isinstance(value, str):
+            name = value
+            if name in getattr(enum_type, '__members__', {}):
+                return enum_type.__members__[name]
+        # Try StrEnum by value
+        try:
+            if issubclass(enum_type, StrEnum) and isinstance(value, str):
+                for m in enum_type:
+                    if m.value == value:
+                        return m
+        except Exception:
+            pass
+        return None
+
+    def _coerce_enum_from_selection(self, enum_type: type[Enum], sel: str) -> Enum | None:
+        """Coerce a Combobox selection (member name string) to an enum member without raising."""
+        if not sel:
+            return None
+        members = getattr(enum_type, '__members__', {})
+        return members.get(sel)
 
     # ------------------------------------------------------------------
     def _refresh_form(self) -> None:
@@ -472,7 +574,28 @@ class BaseObjectEntityTab(ttk.Frame):
                 new_val = None
             else:
                 try:
-                    if typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
+                    if isinstance(typ, type) and issubclass(typ, Enum):
+                        sel = str(raw)
+                        # If blank (e.g., excluded original like UNKNOWN), skip updating this field
+                        if sel == '':
+                            continue
+                        # If the selection is NONE (and exists in this enum), store None so DB gets NULL
+                        if sel.upper() == 'NONE' and 'NONE' in getattr(typ, '__members__', {}):
+                            new_val = None
+                        else:
+                            # For IntEnum formatted as '(value)NAME', extract NAME
+                            name_part = sel
+                            if sel.startswith('(') and ')' in sel:
+                                try:
+                                    name_part = sel.split(')', 1)[1]
+                                except Exception:
+                                    name_part = sel
+                            # Resolve by name
+                            resolved = self._coerce_enum_from_selection(typ, name_part)
+                            if resolved is None:
+                                continue
+                            new_val = resolved
+                    elif typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
                         new_val = int(raw)
                     elif typ in (float, 'float'):
                         new_val = float(raw)
@@ -481,7 +604,7 @@ class BaseObjectEntityTab(ttk.Frame):
                     else:
                         new_val = raw
                 except Exception:
-                    # Show error and revert this field to previous value, but continue others
+                    # Handle inputting incorrect value type into field and revert this field to previous value
                     try:
                         type_name = typ if isinstance(typ, str) else getattr(typ, '__name__', str(typ))
                         messagebox.showerror(
