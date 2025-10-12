@@ -478,12 +478,26 @@ class BaseObjectEntityTab(ttk.Frame):
                         new_val = float(raw)
                     elif typ in (bool, 'bool'):
                         raise NotImplementedError("Boolean fields should use Checkbutton/BooleanVar")
-                        # value = str(raw).lower() in {"1", "true", "yes", "on"} TODO: Remove?
                     else:
                         new_val = raw
                 except Exception:
-                    #TODO: show error box for invalid input
-                    new_val = raw
+                    # Show error and revert this field to previous value, but continue others
+                    try:
+                        type_name = typ if isinstance(typ, str) else getattr(typ, '__name__', str(typ))
+                        messagebox.showerror(
+                            "Invalid input",
+                            f"Field '{name}': '{raw}' is not a valid {type_name}.\nReverting to previous value.",
+                        )
+                    except Exception:
+                        pass
+                    # Revert entry text to prior display value
+                    try:
+                        revert_text = '' if old_val is None else str(old_val)
+                        var.set(revert_text)
+                    except Exception:
+                        pass
+                    # Skip updating this attribute; move to next field
+                    continue
             if new_val != old_val:
                 setattr(target_obj, name, new_val)
                 any_changed = True
