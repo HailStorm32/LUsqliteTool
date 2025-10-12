@@ -482,6 +482,7 @@ class BaseObjectEntityTab(ttk.Frame):
                     else:
                         new_val = raw
                 except Exception:
+                    #TODO: show error box for invalid input
                     new_val = raw
             if new_val != old_val:
                 setattr(target_obj, name, new_val)
@@ -597,7 +598,7 @@ class BaseObjectEntityTab(ttk.Frame):
                     self.tree.item(root_iid, text=self._format_node_text({'id': obj.object_id, 'name': obj.name}))
             except Exception:
                 pass
-            
+
         # Update unsaved changes indicator after applying/persisting
         self._update_unsaved_indicator()
 
@@ -679,6 +680,38 @@ class BaseObjectEntityTab(ttk.Frame):
             label.configure(text="Unsaved changes", foreground="#d97706")
         else:
             label.configure(text="")
+
+    # Public helpers for Application to use on exit
+    def has_unsaved_changes(self) -> bool:
+        return self._any_unsaved_changes()
+
+    def save_all_dirty(self) -> list[int]:
+        """Persist all dirty cached objects for this tab. Returns list of saved object ids.
+
+        Applies current form changes in-memory before saving to ensure latest edits are included.
+        """
+        # Ensure form edits are applied to the cached object but not yet persisted
+        try:
+            self._apply_current_form_changes()
+        except Exception:
+            pass
+
+        saved_ids: list[int] = []
+        # Iterate over a static list of items as we may modify _object_cache during saves
+        for obj_id, obj in list(self._object_cache.items()):
+            try:
+                if self._object_is_dirty(obj):
+                    # Service is provided by subclasses (e.g., ItemsTab)
+                    self._service.save_item(obj)
+                    # Remove from cache so it reloads fresh next time
+                    self._object_cache.pop(obj_id, None)
+                    saved_ids.append(obj_id)
+            except Exception as exc:
+                # Surface the error to caller by re-raising with context
+                raise RuntimeError(f"Failed to save object {obj_id}: {exc}")
+        # Refresh indicator after saving
+        self._update_unsaved_indicator()
+        return saved_ids
 
     # ------------------------------------------------------------------
     def _sort_list(
@@ -1066,13 +1099,57 @@ class Application:
         notebook.pack(fill=tk.BOTH, expand=True)
 
         # Item tab --------------------------------------------------
-        items_tab = ItemsTab(notebook, self.item_service)
-        notebook.add(items_tab, text="Items")
+        self.items_tab = ItemsTab(notebook, self.item_service)
+        notebook.add(self.items_tab, text="Items")
 
         # NPC tab placeholder ------------------------------------------
         npc_tab = ttk.Frame(notebook)
         ttk.Label(npc_tab, text="NPC tools coming soon").pack(padx=10, pady=10)
         notebook.add(npc_tab, text="NPCs")
+
+        # Intercept window close to warn about unsaved changes
+        try:
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        except Exception:
+            pass
+
+    def _on_close(self) -> None:  # pragma: no cover - UI interaction
+        """Prompt to save/discard unsaved changes on exit."""
+        try:
+            tabs_with_changes = []
+            # Extend this list when more tabs inherit BaseObjectEntityTab
+            for tab in [getattr(self, 'items_tab', None)]:
+                if tab is not None and hasattr(tab, 'has_unsaved_changes') and tab.has_unsaved_changes():
+                    tabs_with_changes.append(tab)
+
+            if not tabs_with_changes:
+                self.root.destroy()
+                return
+
+            res = messagebox.askyesnocancel(
+                "Unsaved changes",
+                "You have unsaved changes. Save before exiting?",
+                default=messagebox.YES,
+                icon=messagebox.WARNING,
+            )
+            # None -> Cancel
+            if res is None:
+                return
+            # True -> Save then exit
+            if res is True:
+                try:
+                    for tab in tabs_with_changes:
+                        tab.save_all_dirty()
+                except Exception as exc:
+                    messagebox.showerror("Save failed", f"Could not save all changes:\n{exc}")
+                    return
+                self.root.destroy()
+                return
+            # False -> Discard and exit
+            self.root.destroy()
+        except Exception:
+            # If anything unexpected, fall back to normal close
+            self.root.destroy()
 
     # ------------------------------------------------------------------
     def run(self) -> None:  # pragma: no cover - visual loop
