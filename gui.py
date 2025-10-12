@@ -31,6 +31,8 @@ class BaseObjectEntityTab(ttk.Frame):
         self.tree_prefix: str = ""  # e.g., 'item' or 'npc' – subclasses set this
         # Search/filter state shared by subclasses
         self.search_var = tk.StringVar(value="")
+        # Unsaved changes state (UI indicator updated via _update_unsaved_indicator)
+        self._has_unsaved_changes = False
 
     # --- abstract methods to be implemented by subclasses ---
     # def _build_form_for(self, component_kind: str) -> None:
@@ -212,6 +214,12 @@ class BaseObjectEntityTab(ttk.Frame):
             # We save the declared dataclass field type (f.type) to guide basic coercion.
             self._entry_widgets.append((f.name, var, py_type, readonly))
 
+            # Mark unsaved state as soon as a field value changes
+            try:
+                var.trace_add('write', lambda *_args: self._mark_unsaved())
+            except Exception:
+                pass
+
             # If there is a tip, add a small info symbol (ⓘ) next to the field.
             # Hovering over this symbol shows the tooltip; avoids accidental popups
             # when just moving across the form.
@@ -321,6 +329,8 @@ class BaseObjectEntityTab(ttk.Frame):
         self.current_component_type = component_type
         self._last_grandchild_iid = grandchild_iid  # store for refresh
         self._build_form_for(component_type, grandchild_iid)
+        # Reflect unsaved state for the newly selected object
+        self._update_unsaved_indicator()
 
     # ------------------------------------------------------------------
     def _on_list_node_expanded(self, event: tk.Event) -> None:
@@ -445,38 +455,47 @@ class BaseObjectEntityTab(ttk.Frame):
         if not entry_widgets:
             return
 
-        # Apply widget values to target object
+        # Apply widget values to target object, track if anything changed
+        any_changed = False
         for name, var, typ, readonly in entry_widgets:
             if readonly:
                 continue
             raw = var.get()
+            old_val = getattr(target_obj, name, None)
             if isinstance(var, tk.BooleanVar):
-                setattr(target_obj, name, bool(raw))
+                new_val = bool(raw)
+                if new_val != bool(old_val):
+                    setattr(target_obj, name, new_val)
+                    any_changed = True
                 continue
             if raw == '':
-                value = None
+                new_val = None
             else:
                 try:
                     if typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
-                        value = int(raw)
+                        new_val = int(raw)
                     elif typ in (float, 'float'):
-                        value = float(raw)
+                        new_val = float(raw)
                     elif typ in (bool, 'bool'):
                         raise NotImplementedError("Boolean fields should use Checkbutton/BooleanVar")
                         # value = str(raw).lower() in {"1", "true", "yes", "on"} TODO: Remove?
                     else:
-                        value = raw
+                        new_val = raw
                 except Exception:
-                    value = raw
-            setattr(target_obj, name, value)
+                    new_val = raw
+            if new_val != old_val:
+                setattr(target_obj, name, new_val)
+                any_changed = True
 
         # Mark dirty
         try:
-            #TODO: for skills, mark both skill row and ObjectSkill component dirty
-            if component_type == 'ObjectSkill':
-                target_obj.dirty = True
-                obj.components['ObjectSkill'].dirty = True
-            target_obj.dirty = True
+            if any_changed:
+                # For skills, mark both skill row and ObjectSkill component dirty
+                if component_type == 'ObjectSkill':
+                    target_obj.dirty = True
+                    obj.components['ObjectSkill'].dirty = True
+                else:
+                    target_obj.dirty = True
         except Exception:
             pass
 
@@ -491,6 +510,12 @@ class BaseObjectEntityTab(ttk.Frame):
 
             # Remove from cache so next load is fresh from DB
             self._object_cache.pop(obj.object_id, None)
+            # Clear unsaved flag after successful save (recomputed in indicator)
+            self._has_unsaved_changes = False
+        else:
+            # Track unsaved state locally only if we actually changed anything
+            if any_changed:
+                self._has_unsaved_changes = True
 
 
         ##################################
@@ -572,6 +597,9 @@ class BaseObjectEntityTab(ttk.Frame):
                     self.tree.item(root_iid, text=self._format_node_text({'id': obj.object_id, 'name': obj.name}))
             except Exception:
                 pass
+            
+        # Update unsaved changes indicator after applying/persisting
+        self._update_unsaved_indicator()
 
     # ------------------------------------------------------------------
     def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Item: #TODO: add NPC type hint when implemented
@@ -604,6 +632,53 @@ class BaseObjectEntityTab(ttk.Frame):
         Delegates to _on_save(persist=False) so conversion logic lives in one place.
         """
         self._on_save(persist=False)
+        self._update_unsaved_indicator()
+
+    def _mark_unsaved(self) -> None:
+        """Set the unsaved flag and update UI indicator."""
+        self._has_unsaved_changes = True
+        self._update_unsaved_indicator()
+
+    # ------------------------------------------------------------------
+    # Unsaved changes indicator helpers
+    # ------------------------------------------------------------------
+    def _object_is_dirty(self, obj: Any) -> bool:
+        try:
+            if getattr(obj, 'dirty', False):
+                return True
+            comps = getattr(obj, 'components', {}) or {}
+            for comp in comps.values():
+                if getattr(comp, 'dirty', False):
+                    return True
+                # Special-case nested rows like ObjectSkill
+                if hasattr(comp, 'skills'):
+                    for row in getattr(comp, 'skills', []) or []:
+                        if getattr(row, 'dirty', False):
+                            return True
+        except Exception:
+            pass
+        return False
+
+    def _any_unsaved_changes(self) -> bool:
+        # If we flipped the local flag recently, honor it, otherwise scan cache
+        if self._has_unsaved_changes:
+            return True
+        try:
+            for obj in self._object_cache.values():
+                if self._object_is_dirty(obj):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _update_unsaved_indicator(self) -> None:
+        label = getattr(self, 'unsaved_label', None)
+        if not label:
+            return
+        if self._any_unsaved_changes():
+            label.configure(text="Unsaved changes", foreground="#d97706")
+        else:
+            label.configure(text="")
 
     # ------------------------------------------------------------------
     def _sort_list(
@@ -769,9 +844,25 @@ class BaseObjectEntityTab(ttk.Frame):
             except Exception:
                 selected_obj_id = None
 
+        # Overlay cached (possibly unsaved) names so filtering/display reflects local edits
+        rows: list[dict[str, int | str]] = []
+        for r in (self._list_data or []):
+            try:
+                rid = r.get('id')
+                rid_int = int(rid)
+            except Exception:
+                rid_int = r.get('id')
+            cached = self._object_cache.get(rid_int)
+            if cached is not None:
+                # Prefer cached name if available
+                name = getattr(cached, 'name', r.get('name'))
+                rows.append({'id': r.get('id'), 'name': name})
+            else:
+                rows.append(r)
+
         # Apply search filter (by fuzzy id contains and/or name contains; id equality also supported)
         term = (self.search_var.get() or "").strip()
-        filtered = list(self._list_data)
+        filtered = list(rows)
         if term:
             t_lower = term.lower()
             id_val = None
@@ -940,6 +1031,14 @@ class ItemsTab(BaseObjectEntityTab):
         # Give sidebar a smaller weight so detail area expands more.
         paned.add(sidebar, weight=1)
         paned.add(self.detail, weight=4)
+
+        # Footer status bar for unsaved changes indicator
+        status_bar = ttk.Frame(self)
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        self.unsaved_label = ttk.Label(status_bar, text="", foreground="#d97706")
+        self.unsaved_label.pack(side=tk.LEFT, padx=8, pady=(0, 4))
+        # Initialize indicator
+        self._update_unsaved_indicator()
 
     # (tree rebuild now handled by BaseObjectEntityTab._rebuild_list_tree)
 
