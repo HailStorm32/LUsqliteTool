@@ -35,7 +35,6 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Fix save for skills
 - Add search functionality
    - search by ID
 - Create

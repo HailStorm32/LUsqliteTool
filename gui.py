@@ -29,6 +29,8 @@ class BaseObjectEntityTab(ttk.Frame):
         self.sort_desc_var = tk.BooleanVar(value=False)    # False=ascending, True=descending
         self._list_data: list[dict[str, int | str]] = []   # cached rows for left tree
         self.tree_prefix: str = ""  # e.g., 'item' or 'npc' – subclasses set this
+        # Search/filter state shared by subclasses
+        self.search_var = tk.StringVar(value="")
 
     # --- abstract methods to be implemented by subclasses ---
     # def _build_form_for(self, component_kind: str) -> None:
@@ -767,6 +769,35 @@ class BaseObjectEntityTab(ttk.Frame):
             except Exception:
                 selected_obj_id = None
 
+        # Apply search filter (by fuzzy id contains and/or name contains; id equality also supported)
+        term = (self.search_var.get() or "").strip()
+        filtered = list(self._list_data)
+        if term:
+            t_lower = term.lower()
+            id_val = None
+            try:
+                id_val = int(term)
+            except Exception:
+                id_val = None
+
+            def _matches(row: dict[str, int | str]) -> bool:
+                rid = row.get('id')
+                rid_str = str(rid)
+                rname = str(row.get('name', ''))
+                cond_name = t_lower in rname.lower()
+                # Fuzzy id match: substring match on the string form of the id
+                cond_id_fuzzy = term in rid_str
+                # Exact id match when term is numeric
+                cond_id_exact = False
+                if id_val is not None:
+                    try:
+                        cond_id_exact = int(rid) == id_val
+                    except Exception:
+                        cond_id_exact = False
+                return cond_name or cond_id_fuzzy or cond_id_exact
+
+            filtered = [r for r in filtered if _matches(r)]
+
         # Clear existing root nodes
         for child in self.tree.get_children(""):
             self.tree.delete(child)
@@ -774,7 +805,7 @@ class BaseObjectEntityTab(ttk.Frame):
         # Sort and rebuild
         sort_by = (self.sort_by_var.get() or "id").lower()
         reverse = bool(self.sort_desc_var.get())
-        sorted_objs = self._sort_list(self._list_data, sort_by=sort_by, reverse=reverse)
+        sorted_objs = self._sort_list(filtered, sort_by=sort_by, reverse=reverse)
 
         for info in sorted_objs:
             object_id = info.get('id')
@@ -830,8 +861,31 @@ class ItemsTab(BaseObjectEntityTab):
         sidebar = ttk.Frame(paned, width=220)  # initial width hint
 
         create_btn = ttk.Button(sidebar, text="Create")
-        create_btn.pack(padx=5, pady=5, fill=tk.X)
-        # Sort controls (provided by base)
+        create_btn.pack(padx=5, pady=(5, 2), fill=tk.X)
+
+        # Search controls ------------------------------------------------
+        search_bar = ttk.Frame(sidebar)
+        search_bar.pack(fill=tk.X, padx=5, pady=(0, 5))
+        ttk.Label(search_bar, text="Search:").pack(side=tk.LEFT)
+        search_entry = ttk.Entry(search_bar, textvariable=self.search_var)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4))
+        # Debounced live search: rebuild list after a short pause in typing
+        self._search_after_id = None
+        def _do_search(_e=None):
+            # Clear any in-memory unsaved edits before refiltering
+            self._apply_current_form_changes()
+            self._rebuild_list_tree()
+        def _debounced_search(*_args):
+            try:
+                if self._search_after_id is not None:
+                    self.after_cancel(self._search_after_id)
+            except Exception:
+                pass
+            # 150ms debounce window
+            self._search_after_id = self.after(150, _do_search)
+        search_entry.bind('<Return>', _do_search)
+        self.search_var.trace_add('write', _debounced_search)
+    # Sort controls (provided by base)
         self._build_sort_bar(sidebar)
 
         # Tree + vertical scrollbar container
