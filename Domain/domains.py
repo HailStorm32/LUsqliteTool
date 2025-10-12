@@ -150,7 +150,7 @@ class ItemComponent:
     decal:                      Optional[int]   = None                  # INT32
     offset_group_id:            Optional[int]   = None                  # INT32
     build_types:                int             = 0                     # INT32
-    req_precondition:           Optional[int]   = 214                   # TEXT4 (cast to int here)
+    req_precondition:           str             = "214"                 # TEXT4
     animation_flag:             Optional[int]   = None                  # INT32
     equip_effects:              Optional[int]   = None                  # INT32
     ready_for_qa:               bool            = False                 # INT_BOOL (0)

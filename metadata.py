@@ -38,7 +38,7 @@ component_field_metadata = {
         "build_types":                { "tip": "Bitmask build types",                "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    },
 
         # Misc functional
-        "req_precondition":           { "tip": "Precondition id (placeholder)",      "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    },
+        "req_precondition":           { "tip": "Precondition id (placeholder)",      "display_name": "",     "type": str,        "min": 0,       "max": None,           "readonly": False,  "advanced": True    },
         "animation_flag":             { "tip": "Animation flag id",                  "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    },
         "equip_effects":              { "tip": "Equip effects id",                   "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    },
         "ready_for_qa":               { "tip": "Marked ready for QA",                "display_name": "",     "type": bool,       "min": None,    "max": None,           "readonly": False,  "advanced": True    },
