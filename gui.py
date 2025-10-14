@@ -1119,10 +1119,19 @@ class ItemsTab(BaseObjectEntityTab):
         paned.pack(fill=tk.BOTH, expand=True)
 
         # Left sidebar --------------------------------------------------
-        sidebar = ttk.Frame(paned, width=220)  # initial width hint
+        sidebar = ttk.Frame(paned, width=260)  # initial width hint
 
-        create_btn = ttk.Button(sidebar, text="Create")
-        create_btn.pack(padx=5, pady=(5, 2), fill=tk.X)
+        # Create row: optional ID entry + Create button
+        create_row = ttk.Frame(sidebar)
+        create_row.pack(fill=tk.X, padx=5, pady=(6, 2))
+        ttk.Label(create_row, text="ID:").pack(side=tk.LEFT)
+        self.create_id_var = tk.StringVar()
+        id_entry = ttk.Entry(create_row, textvariable=self.create_id_var, width=12)
+        id_entry.pack(side=tk.LEFT, padx=(4, 4))
+        self._add_tooltip(id_entry, "Optional. Unsigned integer up to 2147483647. Leave empty to auto-assign.")
+
+        create_btn = ttk.Button(create_row, text="Create", command=self._on_create_item)
+        create_btn.pack(side=tk.LEFT, padx=(4, 0))
 
         # Search controls ------------------------------------------------
         search_bar = ttk.Frame(sidebar)
@@ -1211,6 +1220,68 @@ class ItemsTab(BaseObjectEntityTab):
         self._update_unsaved_indicator()
 
     # (tree rebuild now handled by BaseObjectEntityTab._rebuild_list_tree)
+
+    # --------------------------------------------------------------
+    # Actions
+    # --------------------------------------------------------------
+    def _on_create_item(self) -> None:
+        """Create a brand new item with default components and select it in the tree.
+
+        Uses the service layer to construct and persist the new item, then refreshes
+        the left list and selects the new entry, opening its base object form.
+        """
+        try:
+            # Parse optional ID from entry; ensure unsigned integer if provided
+            raw_id = (self.create_id_var.get() or "").strip() if hasattr(self, 'create_id_var') else ""
+            provided_id: int | None
+            if raw_id == "":
+                provided_id = None
+            else:
+                if not raw_id.isdigit():
+                    messagebox.showerror("Invalid ID", "ID must be an unsigned integer (digits only).")
+                    return
+                provided_id = int(raw_id)
+                if provided_id <= 0:
+                    messagebox.showerror("Invalid ID", "ID must be a positive unsigned integer.")
+                    return
+                if provided_id > 2_147_483_647:
+                    messagebox.showerror("Invalid ID", "ID exceeds 32-bit signed integer maximum (2147483647).")
+                    return
+
+            # Ask service to create and persist a default item
+            new_item = self._service.create_default_item(provided_id)
+            if not new_item:
+                messagebox.showerror("Create failed", "Could not create item.")
+                return
+
+            # Invalidate cached list data so a rebuild pulls the new row
+            self._list_data = []
+            # Also drop any cached object with the same id to read fresh
+            self._object_cache.pop(new_item.object_id, None)
+
+            # Rebuild tree and select the newly created item
+            self._rebuild_list_tree()
+            # Compute possible iids and try to select
+            candidate_iids = [self._make_root_iid(new_item.object_id), self._make_root_iid_alt(new_item.object_id)]
+            target_iid = next((iid for iid in candidate_iids if self.tree.exists(iid)), None)
+            if target_iid is not None:
+                try:
+                    # Ensure node is visible & focused
+                    self.tree.selection_set(target_iid)
+                    self.tree.focus(target_iid)
+                    self.tree.see(target_iid)
+                    # Build the base form for the new object
+                    self.current_object = new_item
+                    self.current_component_type = "object"
+                    self._build_form_for("object")
+                except Exception:
+                    pass
+            else:
+                # Fallback: notify creation succeeded
+                messagebox.showinfo("Item created", f"Created item {new_item.object_id}.")
+
+        except Exception as exc:
+            messagebox.showerror("Create failed", str(exc))
 
 
 class Application:

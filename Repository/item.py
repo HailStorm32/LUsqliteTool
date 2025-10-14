@@ -9,6 +9,23 @@ class ItemRepository(baseRepository):
     def __init__(self, db_path: str):
         super().__init__(db_path)
 
+    def generate_new_id(self) -> int:
+        """Generate a new unique object id.
+
+        Strategy: use MAX(id)+1 from Objects table. This keeps ids monotonic and
+        avoids collisions without guessing. Guards against 32-bit overflow.
+        """
+        conn = self._connect_to_db()
+        try:
+            row = conn.execute("SELECT MAX(id) AS max_id FROM Objects").fetchone()
+            max_id = row[0] if row is not None else None
+            new_id = (int(max_id) + 1) if max_id is not None else 1
+            # Basic overflow guard for 32-bit signed range
+            if new_id > 2_147_483_647:
+                raise SaveError("Exhausted id space; cannot create new object id.")
+            return new_id
+        finally:
+            conn.close()
 
     def list_items(self, limit: int | None = None) -> list[dict[str, int | str]]:
         """
