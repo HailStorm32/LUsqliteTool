@@ -27,6 +27,100 @@ class baseRepository:
         finally:
             conn.close()
 
+    ############################
+    #-------- DELETE -----------
+    ############################
+    def delete_object(self, object_id: int) -> None:
+        """Permanently delete an object and all related components.
+
+        This removes:
+        - ComponentsRegistry entries for the object
+        - Corresponding ItemComponent and RenderComponent rows referenced by the registry
+        - Any ObjectSkills rows for the object (objectTemplate)
+        - The Objects row itself
+        """
+        conn = self._connect_to_db()
+        try:
+            conn.execute("BEGIN")
+            # Fetch component ids from registry
+            reg_rows = conn.execute(
+                "SELECT component_type, component_id FROM ComponentsRegistry WHERE id=?",
+                (object_id,)
+            ).fetchall()
+
+            # Delete skill rows (by objectTemplate); skill component ids may be zero
+            conn.execute("DELETE FROM ObjectSkills WHERE objectTemplate=?", (object_id,))
+
+            # Delete component rows for known components
+            for row in reg_rows:
+                ctype = row['component_type']
+                cid = row['component_id']
+                if ctype == Components.ITEM:
+                    conn.execute("DELETE FROM ItemComponent WHERE id=?", (cid,))
+                elif ctype == Components.RENDER:
+                    conn.execute("DELETE FROM RenderComponent WHERE id=?", (cid,))
+                # Components.SKILL covered by ObjectSkills deletion above
+
+            # Delete registry entries
+            conn.execute("DELETE FROM ComponentsRegistry WHERE id=?", (object_id,))
+
+            # Finally, delete object itself
+            conn.execute("DELETE FROM Objects WHERE id=?", (object_id,))
+
+            conn.commit()
+        except Exception:
+            conn.rollback(); raise
+        finally:
+            conn.close()
+
+    def delete_item_component(self, component_id: int) -> None:
+        """Delete an ItemComponent and clear registry references."""
+        conn = self._connect_to_db()
+        try:
+            conn.execute("BEGIN")
+            conn.execute(
+                "DELETE FROM ComponentsRegistry WHERE component_id=? AND component_type=?",
+                (component_id, Components.ITEM)
+            )
+            conn.execute("DELETE FROM ItemComponent WHERE id=?", (component_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback(); raise
+        finally:
+            conn.close()
+
+    def delete_render_component(self, component_id: int) -> None:
+        """Delete a RenderComponent and clear registry references."""
+        conn = self._connect_to_db()
+        try:
+            conn.execute("BEGIN")
+            conn.execute(
+                "DELETE FROM ComponentsRegistry WHERE component_id=? AND component_type=?",
+                (component_id, Components.RENDER)
+            )
+            conn.execute("DELETE FROM RenderComponent WHERE id=?", (component_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback(); raise
+        finally:
+            conn.close()
+
+    def delete_skill_component(self, object_id: int) -> None:
+        """Delete all skills for an object and its registry entry (skill component)."""
+        conn = self._connect_to_db()
+        try:
+            conn.execute("BEGIN")
+            conn.execute("DELETE FROM ObjectSkills WHERE objectTemplate=?", (object_id,))
+            conn.execute(
+                "DELETE FROM ComponentsRegistry WHERE id=? AND component_type=?",
+                (object_id, Components.SKILL)
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback(); raise
+        finally:
+            conn.close()
+
 
     ############################
     #-------- LOAD -------------

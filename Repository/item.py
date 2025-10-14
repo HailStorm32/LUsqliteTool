@@ -52,6 +52,22 @@ class ItemRepository(baseRepository):
             conn.close()
 
     ##########################
+    #-------- DELETE ---------
+    ##########################
+    def delete(self, object_id: int) -> None:
+        """Permanently delete an object and all related components (delegates to base)."""
+        super().delete_object(object_id)
+
+    def delete_item_component(self, component_id: int) -> None:
+        super().delete_item_component(component_id)
+
+    def delete_render_component(self, component_id: int) -> None:
+        super().delete_render_component(component_id)
+
+    def delete_skill_component(self, object_id: int) -> None:
+        super().delete_skill_component(object_id)
+
+    ##########################
     #-------- LOAD -----------
     ##########################
     def get(self, object_id: int) -> Item:

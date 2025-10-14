@@ -120,6 +120,33 @@ class ItemService:
         saved = self._repo.get(new_id)
         return saved or item
 
+    # ------------------------------------------------------------------
+    # Deletion operations
+    # ------------------------------------------------------------------
+    def delete_item(self, object_id: int) -> None:
+        """Permanently delete an item and all of its components from the database."""
+        if not isinstance(object_id, int) or object_id <= 0:
+            raise ValueError("Object ID must be a positive unsigned integer")
+        self._repo.delete(object_id)
+
+    def delete_item_component(self, component_id: int) -> None:
+        """Permanently delete an ItemComponent by its id and remove its registry entry."""
+        if not isinstance(component_id, int) or component_id <= 0:
+            raise ValueError("Component ID must be a positive unsigned integer")
+        self._repo.delete_item_component(component_id)
+
+    def delete_render_component(self, component_id: int) -> None:
+        """Permanently delete a RenderComponent by its id and remove its registry entry."""
+        if not isinstance(component_id, int) or component_id <= 0:
+            raise ValueError("Component ID must be a positive unsigned integer")
+        self._repo.delete_render_component(component_id)
+
+    def delete_skill_component(self, object_id: int) -> None:
+        """Permanently delete all skills for an object and remove the registry entry."""
+        if not isinstance(object_id, int) or object_id <= 0:
+            raise ValueError("Object ID must be a positive unsigned integer")
+        self._repo.delete_skill_component(object_id)
+
 
 # Placeholder for future NPCService so the GUI has an obvious insertion point.
 class NPCService:

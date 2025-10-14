@@ -650,6 +650,23 @@ class BaseObjectEntityTab(ttk.Frame):
             self._object_cache.pop(obj.object_id, None)
             # Clear unsaved flag after successful save (recomputed in indicator)
             self._has_unsaved_changes = False
+
+            # Also persist any queued root deletions
+            try:
+                self._persist_root_deletions()
+            except Exception as exc:
+                try:
+                    messagebox.showerror("Delete failed", f"Could not delete some items: {exc}")
+                except Exception:
+                    pass
+            # Persist queued component deletions
+            try:
+                self._persist_component_deletions()
+            except Exception as exc:
+                try:
+                    messagebox.showerror("Delete failed", f"Could not delete some components: {exc}")
+                except Exception:
+                    pass
         else:
             # Track unsaved state locally only if we actually changed anything
             if any_changed:
@@ -818,6 +835,37 @@ class BaseObjectEntityTab(ttk.Frame):
         else:
             label.configure(text="")
 
+    # ------------------------------------------------------------------
+    # Undo button state helper
+    # ------------------------------------------------------------------
+    def _update_undo_button_state(self) -> None:
+        """Enable the Undo button only when there are local deletions to undo.
+
+        This looks for any of the local delete buffers/sets that we maintain:
+        - _deleted_root_ids (set)
+        - _deleted_components (list)
+        - _deleted_skill_rows (list)
+        If none exist or all are empty, the button is disabled; otherwise enabled.
+        Safe no-op for tabs that don't define an undo button.
+        """
+        btn = getattr(self, 'undo_btn', None)
+        if not btn:
+            return
+        has_local = False
+        try:
+            if getattr(self, '_deleted_root_ids', None):
+                has_local = True
+            elif getattr(self, '_deleted_components', None):
+                has_local = bool(getattr(self, '_deleted_components'))
+            elif getattr(self, '_deleted_skill_rows', None):
+                has_local = bool(getattr(self, '_deleted_skill_rows'))
+        except Exception:
+            has_local = False
+        try:
+            btn.configure(state=(tk.NORMAL if has_local else tk.DISABLED))
+        except Exception:
+            pass
+
     # Public helpers for Application to use on exit
     def has_unsaved_changes(self) -> bool:
         return self._any_unsaved_changes()
@@ -834,6 +882,16 @@ class BaseObjectEntityTab(ttk.Frame):
             pass
 
         saved_ids: list[int] = []
+        # First, persist any pending root deletions
+        try:
+            self._persist_root_deletions()
+        except Exception as exc:
+            raise RuntimeError(f"Failed to delete some objects: {exc}")
+        # Persist any pending component deletions
+        try:
+            self._persist_component_deletions()
+        except Exception as exc:
+            raise RuntimeError(f"Failed to delete some components: {exc}")
         # Iterate over a static list of items as we may modify _object_cache during saves
         for obj_id, obj in list(self._object_cache.items()):
             try:
@@ -849,6 +907,74 @@ class BaseObjectEntityTab(ttk.Frame):
         # Refresh indicator after saving
         self._update_unsaved_indicator()
         return saved_ids
+
+    def _persist_root_deletions(self) -> None:
+        """Persist queued root deletions to the database via the service layer.
+
+        After successful deletion, remove ids from cache, clear from deletion set,
+        and refresh the left list/tree to reflect permanent removal.
+        """
+        deleted = getattr(self, '_deleted_root_ids', None)
+        if not deleted:
+            return
+        errors: list[str] = []
+        for oid in list(deleted):
+            try:
+                # Use service layer to delete fully (components + object + registry)
+                self._service.delete_item(int(oid))
+                # Clean up local state
+                self._object_cache.pop(int(oid), None)
+                deleted.remove(oid)
+            except Exception as exc:
+                errors.append(f"{oid}: {exc}")
+        # Rebuild list to drop deleted entries permanently
+        try:
+            self._list_data = []  # force reload
+            self._rebuild_list_tree()
+        except Exception:
+            pass
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        # Update undo button state after persistence
+        try:
+            self._update_undo_button_state()
+        except Exception:
+            pass
+
+    def _persist_component_deletions(self) -> None:
+        """Persist queued component deletions to the database via the service layer."""
+        queue = getattr(self, '_deleted_components', None)
+        if not queue:
+            return
+        errors: list[str] = []
+        for item in list(queue):
+            try:
+                ctype = item.get('type')
+                cid = item.get('component_id')
+                oid = item.get('object_id')
+                if ctype == 'ItemComponent' and cid is not None:
+                    self._service.delete_item_component(int(cid))
+                elif ctype == 'RenderComponent' and cid is not None:
+                    self._service.delete_render_component(int(cid))
+                elif ctype == 'ObjectSkill' and oid is not None:
+                    self._service.delete_skill_component(int(oid))
+                # Remove from queue after successful deletion
+                queue.remove(item)
+            except Exception as exc:
+                errors.append(f"{ctype or '?'}: {exc}")
+        # Force left list refresh to reflect permanent removal of components where applicable
+        try:
+            self._list_data = []
+            self._rebuild_list_tree()
+        except Exception:
+            pass
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        # Update undo button after persistence
+        try:
+            self._update_undo_button_state()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def _sort_list(
@@ -1016,12 +1142,20 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Overlay cached (possibly unsaved) names so filtering/display reflects local edits
         rows: list[dict[str, int | str]] = []
+        # Skip locally deleted roots (user removed from view; not persisted yet)
+        deleted_roots = getattr(self, '_deleted_root_ids', set())
         for r in (self._list_data or []):
             try:
                 rid = r.get('id')
                 rid_int = int(rid)
             except Exception:
                 rid_int = r.get('id')
+            # Filter out if user deleted this root item locally
+            try:
+                if rid_int in deleted_roots:
+                    continue
+            except Exception:
+                pass
             cached = self._object_cache.get(rid_int)
             if cached is not None:
                 # Prefer cached name if available
@@ -1133,6 +1267,17 @@ class ItemsTab(BaseObjectEntityTab):
         create_btn = ttk.Button(create_row, text="Create", command=self._on_create_item)
         create_btn.pack(side=tk.LEFT, padx=(4, 0))
 
+        # Undo local deletes button
+        undo_row = ttk.Frame(sidebar)
+        undo_row.pack(fill=tk.X, padx=5, pady=(2, 6))
+        self.undo_btn = ttk.Button(undo_row, text="Undo local deletes", command=self._undo_local_deletes)
+        self.undo_btn.pack(side=tk.LEFT)
+        # Initially disabled until there is something to undo
+        try:
+            self.undo_btn.configure(state=tk.DISABLED)
+        except Exception:
+            pass
+
         # Search controls ------------------------------------------------
         search_bar = ttk.Frame(sidebar)
         search_bar.pack(fill=tk.X, padx=5, pady=(0, 5))
@@ -1155,7 +1300,7 @@ class ItemsTab(BaseObjectEntityTab):
             self._search_after_id = self.after(150, _do_search)
         search_entry.bind('<Return>', _do_search)
         self.search_var.trace_add('write', _debounced_search)
-    # Sort controls (provided by base)
+        # Sort controls (provided by base)
         self._build_sort_bar(sidebar)
 
         # Tree + vertical scrollbar container
@@ -1174,6 +1319,10 @@ class ItemsTab(BaseObjectEntityTab):
 
         self.tree.bind("<<TreeviewSelect>>", self._on_list_node_select)
         self.tree.bind("<<TreeviewOpen>>", self._on_list_node_expanded)
+        # Right-click (context menu) for delete actions
+        self.tree.bind("<Button-3>", self._on_tree_right_click)
+        # Also ensure left-click sets selection before context menu
+        self.tree.bind("<Button-1>", lambda e: None, add=True)
 
         # Right content area --------------------------------------------
         self.detail = ttk.Frame(paned)
@@ -1218,6 +1367,8 @@ class ItemsTab(BaseObjectEntityTab):
         self.unsaved_label.pack(side=tk.LEFT, padx=8, pady=(0, 4))
         # Initialize indicator
         self._update_unsaved_indicator()
+        # Initialize undo button state
+        self._update_undo_button_state()
 
     # (tree rebuild now handled by BaseObjectEntityTab._rebuild_list_tree)
 
@@ -1282,6 +1433,391 @@ class ItemsTab(BaseObjectEntityTab):
 
         except Exception as exc:
             messagebox.showerror("Create failed", str(exc))
+
+    # --------------------------------------------------------------
+    # Context menu: delete (local) root items and skill subitems
+    # --------------------------------------------------------------
+    def _on_tree_right_click(self, event: tk.Event) -> None:
+        """Show a context menu to delete nodes locally (with confirmation).
+
+        - Root item nodes: removed from the view (local only). Not persisted; a future
+          save won't delete from DB as repository currently doesn't implement object deletion.
+        - Skill subitem nodes (under ObjectSkill): removes that skill row from in-memory
+          object and marks ObjectSkills as dirty so that a subsequent Save will persist
+          the deletion (since skill saves replace all rows).
+        """
+        if not hasattr(self, 'tree'):
+            return
+        # Determine item under cursor and select it
+        iid = self.tree.identify_row(event.y)
+        if not iid:
+            return
+        try:
+            self.tree.selection_set(iid)
+        except Exception:
+            pass
+
+    # Build a minimal context menu depending on node type
+        menu = tk.Menu(self.tree, tearoff=0)
+
+        # Distinguish node kinds by iid structure
+        parts = iid.split(":")
+        is_root = (":" not in iid)
+        is_child = (":" in iid and len(parts) == 2)
+        is_grandchild = (":" in iid and len(parts) == 3)
+
+        # Root: allow local delete (remove from view; will be permanently deleted on Save)
+        if is_root:
+            def _delete_root_local():
+                # Confirm
+                try:
+                    text = self.tree.item(iid, 'text') or ''
+                except Exception:
+                    text = ''
+                if not messagebox.askyesno(
+                    "Delete item",
+                    f"Delete {text}?\n\nThis removes it from the view now and will delete it permanently when you press Save.\nAll of its components and skills will also be deleted.",
+                    icon=messagebox.WARNING,
+                    default=messagebox.NO,
+                ):
+                    return
+                # Parse id
+                try:
+                    obj_id = int(iid.split('-', 1)[1])
+                except Exception:
+                    obj_id = None
+                # Track local deletion and update tree
+                if not hasattr(self, '_deleted_root_ids'):
+                    self._deleted_root_ids = set()
+                if obj_id is not None:
+                    self._deleted_root_ids.add(obj_id)
+                try:
+                    self.tree.delete(iid)
+                except Exception:
+                    pass
+                # Mark unsaved change so user knows to Save to persist deletion
+                self._has_unsaved_changes = True
+                self._update_unsaved_indicator()
+                self._update_undo_button_state()
+                # Clear form if we deleted the currently viewed object
+                sel = self.tree.selection()
+                if not sel:
+                    # If nothing selected now, clear right panel
+                    self.current_object = None
+                    self.current_component_type = None
+                    self._show_message("Select an item or component to edit")
+                # Reflect local change in the left list immediately
+                self._rebuild_list_tree()
+            menu.add_command(label="Delete item (local)", command=_delete_root_local)
+
+        # Component child: allow removing an entire component (persisted on save)
+        if is_child:
+            parent_iid = parts[0]  # e.g., item-<id>
+            comp_name = parts[1]
+
+            def _delete_component_local():
+                # Parse object id
+                try:
+                    obj_id = int(parent_iid.split('-', 1)[1])
+                except Exception:
+                    return
+
+                # Load object (cache or service)
+                obj = self._object_cache.get(obj_id)
+                if obj is None:
+                    try:
+                        # Access private loader from base class to respect cache/use service
+                        obj = self._BaseObjectEntityTab__load_relevant_object(parent_iid, obj_id)
+                        if obj is not None:
+                            self._object_cache[obj_id] = obj
+                    except Exception:
+                        obj = None
+                if obj is None:
+                    messagebox.showerror("Delete failed", "Could not load object to modify component.")
+                    return
+
+                # Confirm
+                if not messagebox.askyesno(
+                    "Delete component",
+                    f"Delete {comp_name} from object {obj_id}?\n\nThis removes it now and will delete it permanently when you press Save.",
+                    icon=messagebox.WARNING,
+                    default=messagebox.NO,
+                ):
+                    return
+
+                # Queue deletion specifics and remove from in-memory object
+                if comp_name == 'ItemComponent':
+                    comp = obj.components.get('ItemComponent')
+                    if comp is None:
+                        return
+                    comp_id = getattr(comp, 'id', None)
+                    # Keep original for undo
+                    deleted_copy = comp
+                    # Remove component from obj
+                    obj.components.pop('ItemComponent', None)
+                    # Track deletion for persistence
+                    if not hasattr(self, '_deleted_components'):
+                        self._deleted_components = []
+                    if comp_id:
+                        self._deleted_components.append({'type': 'ItemComponent', 'component_id': int(comp_id), 'object_id': obj_id, 'component': deleted_copy})
+                elif comp_name == 'RenderComponent':
+                    comp = obj.components.get('RenderComponent')
+                    if comp is None:
+                        return
+                    comp_id = getattr(comp, 'id', None)
+                    deleted_copy = comp
+                    obj.components.pop('RenderComponent', None)
+                    if not hasattr(self, '_deleted_components'):
+                        self._deleted_components = []
+                    if comp_id:
+                        self._deleted_components.append({'type': 'RenderComponent', 'component_id': int(comp_id), 'object_id': obj_id, 'component': deleted_copy})
+                elif comp_name == 'ObjectSkill':
+                    # Remove the entire skill component (all rows); persistence later
+                    if obj.components.get('ObjectSkill') is None:
+                        return
+                    deleted_copy = obj.components.get('ObjectSkill')
+                    obj.components.pop('ObjectSkill', None)
+                    if not hasattr(self, '_deleted_components'):
+                        self._deleted_components = []
+                    self._deleted_components.append({'type': 'ObjectSkill', 'component_id': None, 'object_id': obj_id, 'component': deleted_copy})
+                else:
+                    # Unknown component type – do nothing
+                    return
+
+                # Mark unsaved and update indicator
+                self._has_unsaved_changes = True
+                self._update_unsaved_indicator()
+                self._update_undo_button_state()
+
+                # Remove the node (and any children) from the tree
+                try:
+                    # If this is ObjectSkill, delete grandchildren as well
+                    if comp_name == 'ObjectSkill':
+                        for child in self.tree.get_children(iid):
+                            try:
+                                self.tree.delete(child)
+                            except Exception:
+                                pass
+                    self.tree.delete(iid)
+                except Exception:
+                    pass
+
+                # If we were viewing this component, clear or switch the form
+                sel = self.tree.selection()
+                if not sel:
+                    self.current_component_type = 'object'
+                    self.current_object = obj
+                    self._build_form_for('object')
+
+            # Only show delete for known component nodes
+            if parts[1] in ('ItemComponent', 'RenderComponent', 'ObjectSkill'):
+                menu.add_command(label="Delete component (local)", command=_delete_component_local)
+
+        # Skill grandchild: allow removing a single skill row (persisted on save)
+        if is_grandchild:
+            def _delete_skill_row():
+                parent_iid = parts[0]  # item-<id>
+                comp_name = parts[1]   # ObjectSkill
+                grandchild_id = parts[2]  # skill_id
+                # Only handle ObjectSkill children
+                if comp_name != 'ObjectSkill':
+                    return
+                # Parse ids
+                try:
+                    obj_id = int(parent_iid.split('-', 1)[1])
+                    skill_id = int(grandchild_id)
+                except Exception:
+                    return
+                # Confirm
+                if not messagebox.askyesno(
+                    "Delete skill",
+                    f"Delete Skill {skill_id} from object {obj_id}?\n\nThis removes it now and will delete it permanently when you press Save.",
+                    icon=messagebox.WARNING,
+                    default=messagebox.NO,
+                ):
+                    return
+                # Load object (prefer cache, otherwise service)
+                obj = self._object_cache.get(obj_id)
+                if obj is None:
+                    try:
+                        # Use base helper if available, else fallback to service
+                        try:
+                            obj = self._BaseObjectEntityTab__load_relevant_object(parent_iid, obj_id)
+                        except Exception:
+                            obj = self._service.get_item(obj_id)
+                        if obj is not None:
+                            self._object_cache[obj_id] = obj
+                    except Exception:
+                        obj = None
+                if obj is None:
+                    messagebox.showerror("Delete failed", "Could not load object to modify skills.")
+                    return
+                skill_comp = obj.components.get('ObjectSkill')
+                if not skill_comp or not hasattr(skill_comp, 'skills'):
+                    messagebox.showerror("Delete failed", "Object has no skills component.")
+                    return
+                # Remove matching skill row and store for undo
+                removed_rows = [row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id]
+                original_len = len(skill_comp.skills)
+                skill_comp.skills = [row for row in skill_comp.skills if getattr(row, 'skill_id', None) != skill_id]
+                if len(skill_comp.skills) == original_len:
+                    # No change
+                    return
+                # Track deleted skill row(s) for undo
+                if removed_rows:
+                    if not hasattr(self, '_deleted_skill_rows'):
+                        self._deleted_skill_rows = []
+                    for r in removed_rows:
+                        self._deleted_skill_rows.append({'object_id': obj_id, 'row': r})
+                # Mark dirty and update UI
+                try:
+                    skill_comp.dirty = True
+                except Exception:
+                    pass
+                self._has_unsaved_changes = True
+                self._update_unsaved_indicator()
+                self._update_undo_button_state()
+                # Remove the node from the tree
+                try:
+                    self.tree.delete(iid)
+                except Exception:
+                    pass
+                # If the deleted node was currently open in the form, clear or switch to the ObjectSkill component
+                sel = self.tree.selection()
+                if not sel:
+                    # Reselect parent skill component node if present
+                    parent_skill_iid = f"{parent_iid}:ObjectSkill"
+                    if self.tree.exists(parent_skill_iid):
+                        try:
+                            self.tree.selection_set(parent_skill_iid)
+                            self.tree.focus(parent_skill_iid)
+                            self.tree.see(parent_skill_iid)
+                            # If the form was showing this skill row, rebuild for the component
+                            self.current_object = obj
+                            self.current_component_type = 'ObjectSkill'
+                            self._build_form_for('ObjectSkill', None)
+                        except Exception:
+                            pass
+                # Ensure parent remains expanded
+                try:
+                    self.tree.item(f"{parent_iid}:ObjectSkill", open=True)
+                except Exception:
+                    pass
+            menu.add_command(label="Delete skill", command=_delete_skill_row)
+
+        # Ensure focus follows selection (helps with keyboard and visual focus)
+        try:
+            self.tree.focus(iid)
+        except Exception:
+            pass
+
+        if menu.index("end") is not None:
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                try:
+                    menu.grab_release()
+                except Exception:
+                    pass
+
+    def _undo_local_deletes(self) -> None:
+        """Undo all local (not yet persisted) deletions: roots, components, and individual skill rows.
+
+        - Restores removed components back onto the cached objects.
+        - Restores removed skill rows to the in-memory skill lists.
+        - Clears the local deletion queues/sets.
+        - Refreshes the left list and form indicator.
+        """
+        # Restore components
+        try:
+            comp_queue = getattr(self, '_deleted_components', []) or []
+            for item in list(comp_queue):
+                oid = item.get('object_id')
+                comp = item.get('component')
+                ctype = item.get('type')
+                if oid is None or comp is None or not ctype:
+                    continue
+                # Load or use cached object
+                obj = self._object_cache.get(oid)
+                if obj is None:
+                    try:
+                        obj = self._service.get_item(int(oid))
+                        if obj is not None:
+                            self._object_cache[oid] = obj
+                    except Exception:
+                        obj = None
+                if obj is None:
+                    continue
+                # Restore component
+                obj.components[ctype] = comp
+                try:
+                    comp.dirty = False
+                except Exception:
+                    pass
+                # Remove from queue
+                comp_queue.remove(item)
+        except Exception:
+            pass
+
+        # Restore removed individual skill rows
+        try:
+            skill_queue = getattr(self, '_deleted_skill_rows', []) or []
+            for item in list(skill_queue):
+                oid = item.get('object_id')
+                row = item.get('row')
+                if oid is None or row is None:
+                    continue
+                obj = self._object_cache.get(oid)
+                if obj is None:
+                    try:
+                        obj = self._service.get_item(int(oid))
+                        if obj is not None:
+                            self._object_cache[oid] = obj
+                    except Exception:
+                        obj = None
+                if obj is None:
+                    continue
+                skill_comp = obj.components.get('ObjectSkill')
+                if skill_comp is None:
+                    # If skill component was also deleted and restored above, it exists now; if not, create minimal container
+                    try:
+                        from Domain.domains import ObjectSkills
+                        skill_comp = ObjectSkills(skills=[]); obj.components['ObjectSkill'] = skill_comp
+                    except Exception:
+                        continue
+                # Avoid duplicate by skill_id
+                sid = getattr(row, 'skill_id', None)
+                if sid is not None and any(getattr(r, 'skill_id', None) == sid for r in skill_comp.skills):
+                    pass
+                else:
+                    skill_comp.skills.append(row)
+                try:
+                    skill_comp.dirty = False
+                except Exception:
+                    pass
+                # Remove from queue
+                skill_queue.remove(item)
+        except Exception:
+            pass
+
+        # Clear local root deletion filter and refresh list/tree
+        try:
+            if hasattr(self, '_deleted_root_ids'):
+                self._deleted_root_ids.clear()
+        except Exception:
+            pass
+
+        # Rebuild list and clear right panel message
+        try:
+            self._rebuild_list_tree()
+            self._update_unsaved_indicator()
+            self._update_undo_button_state()
+            try:
+                messagebox.showinfo("Undo", "Local deletes have been undone.")
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
 class Application:
