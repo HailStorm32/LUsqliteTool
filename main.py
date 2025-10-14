@@ -35,12 +35,16 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Add search functionality
-   - search by ID
 - Create
    - new item from scratch
    - duplicate existing item
    - add/remove components to existing item by right-clicking in component list
+- Scroll fields area will scroll page
+- NPC functionality
+   - domains
+   - repository
+   - service
+   - GUI
 
 
 
