@@ -39,6 +39,7 @@ TODO:
    - duplicate existing item
    - add/remove components to existing item by right-clicking in component list
 - Delete item
+   - make common delete button code
 - Scroll fields area will scroll page
 - NPC functionality
    - domains
@@ -47,5 +48,9 @@ TODO:
    - GUI
 
 
+DestructableCompoent -  DeathBehavior mapping
+    https://discord.com/channels/942917763054313552/942924632955174952/1427887339828678713
 
+color1 mapping
+    https://explorer.lu-dev.net/misc/brick-colors
 """
