@@ -9,6 +9,7 @@ from Service.services import ItemService, NPCService
 from metadata import component_field_metadata
 from dataclasses import fields, is_dataclass
 from typing import Any
+from Domain.domains import ColorType  # Color enum used for item color field and swatch
 
 # Import Item for type hinting
 from Service.services import Item
@@ -208,28 +209,16 @@ class BaseObjectEntityTab(ttk.Frame):
                     enum_type = py_type
                 else:
                     enum_type = declared_type
-                # Filter out UNKNOWN/INVALID-like options and prepare display labels
-                excluded = {"UNKNOWN", "INVALID"}
-                included_members = [m for m in enum_type if m.name.upper() not in excluded]
-                is_int_enum = False
-                try:
-                    is_int_enum = issubclass(enum_type, IntEnum)
-                except Exception:
-                    is_int_enum = False
 
-                def _display_label(m: Enum) -> str:
-                    if is_int_enum and m.name.upper() != 'NONE':
-                        return f"({m.value}){m.name}"
-                    return m.name
-
-                options = [_display_label(m) for m in included_members]
+                # Build member list and labels via centralized helpers
+                included_members, options = self._build_enum_display(enum_type)
 
                 # Resolve current value to an enum member without using exceptions for control flow
                 current_member = self._resolve_enum_member(enum_type, value)
 
                 # Determine display for current value
                 if current_member is not None and current_member in included_members:
-                    display = _display_label(current_member)
+                    display = self._format_enum_label(enum_type, current_member)
                 elif current_member is None and any(m.name.upper() == 'NONE' for m in included_members):
                     display = 'NONE'
                 else:
@@ -241,6 +230,21 @@ class BaseObjectEntityTab(ttk.Frame):
                     combo.configure(state='disabled')
                 combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                 widget_for_tooltip = combo
+
+                # If this is the ColorType enum, show a live color swatch and hex value next to the dropdown
+                if enum_type is ColorType:
+                    # Build swatch UI elements and wire them to follow dropdown selection
+                    swatch, hex_label = self._create_color_swatch(inner, row)
+                    # Initialize and keep in sync with dropdown selection/events
+                    self._update_color_swatch(combo, var, enum_type, swatch, hex_label)
+                    try:
+                        var.trace_add('write', lambda *_: self._update_color_swatch(combo, var, enum_type, swatch, hex_label))
+                    except Exception:
+                        pass
+                    try:
+                        combo.bind('<<ComboboxSelected>>', lambda _e: self._update_color_swatch(combo, var, enum_type, swatch, hex_label))
+                    except Exception:
+                        pass
             else:
                 # For non-boolean fields we use a simple text Entry.
                 # If the value looks like an enum (has .name and .value) show the enum name.
@@ -333,6 +337,52 @@ class BaseObjectEntityTab(ttk.Frame):
         # Already the right enum
         if isinstance(value, enum_type):
             return value
+        # Special-case: enums like ColorType whose members carry .id and .hex
+        # Support resolving from integer id, numeric string, hex string, or tuple (id, hex)
+        try:
+            _sample = next(iter(enum_type))
+            is_color_like = hasattr(_sample, 'id') and hasattr(_sample, 'hex')
+        except Exception:
+            is_color_like = False
+        if is_color_like:
+            # Tuple form (id, hex)
+            try:
+                if isinstance(value, tuple) and len(value) >= 1:
+                    vid = value[0]
+                    vhex = value[1] if len(value) > 1 else None
+                    for m in enum_type:
+                        if getattr(m, 'id', None) == vid or (vhex is not None and getattr(m, 'hex', None) == vhex):
+                            return m
+            except Exception:
+                pass
+            # Integer id
+            if isinstance(value, int):
+                for m in enum_type:
+                    if getattr(m, 'id', None) == value:
+                        return m
+            # String inputs: numeric id, hex code, or labels like '(id)NAME'
+            if isinstance(value, str):
+                v = value.strip()
+                # Strip '(id)NAME' to NAME for name/other resolution below
+                if v.startswith('(') and ')' in v:
+                    try:
+                        v = v.split(')', 1)[1]
+                    except Exception:
+                        pass
+                # Hex code
+                if v.startswith('#'):
+                    for m in enum_type:
+                        if getattr(m, 'hex', None) == v:
+                            return m
+                # Numeric string id
+                if v.isdigit():
+                    try:
+                        iv = int(v)
+                        for m in enum_type:
+                            if getattr(m, 'id', None) == iv:
+                                return m
+                    except Exception:
+                        pass
         # Try int-like for IntEnum
         try:
             if issubclass(enum_type, IntEnum):
@@ -351,6 +401,12 @@ class BaseObjectEntityTab(ttk.Frame):
         # Try name lookup
         if isinstance(value, str):
             name = value
+            # Normalize '(value)NAME' labels to NAME for robust lookup
+            try:
+                if name.startswith('(') and ')' in name:
+                    name = name.split(')', 1)[1]
+            except Exception:
+                pass
             if name in getattr(enum_type, '__members__', {}):
                 return enum_type.__members__[name]
         # Try StrEnum by value
@@ -367,8 +423,129 @@ class BaseObjectEntityTab(ttk.Frame):
         """Coerce a Combobox selection (member name string) to an enum member without raising."""
         if not sel:
             return None
+        # Allow labels formatted as '(value)NAME' by extracting NAME
+        try:
+            if sel.startswith('(') and ')' in sel:
+                sel = sel.split(')', 1)[1]
+        except Exception:
+            pass
         members = getattr(enum_type, '__members__', {})
         return members.get(sel)
+
+    # ------------------------------------------------------------------
+    # Enum display helpers (centralized label formatting for dropdowns)
+    # ------------------------------------------------------------------
+    def _format_enum_label(self, enum_type: type[Enum], member: Enum) -> str:
+        """Return a user-friendly label for an enum member in dropdowns.
+
+        Rules (kept consistent across the UI):
+        - IntEnum: show "(value)NAME" for clarity, except plain 'NONE'.
+        - ColorType: show "(id)NAME" (no hex) to keep the list concise.
+        - Others: show the member's NAME.
+
+        This centralization avoids duplicated closures and keeps formatting
+        consistent across all enum fields.
+        """
+        # IntEnum: include numeric value prefix, except for NONE
+        try:
+            if issubclass(enum_type, IntEnum) and member.name.upper() != 'NONE':
+                return f"({member.value}){member.name}"
+        except Exception:
+            pass
+        # ColorType-like enums: prefer id prefix instead of hex in list
+        try:
+            if enum_type is ColorType and member.name.upper() != 'NONE':
+                cid = getattr(member, 'id', None)
+                if isinstance(cid, int):
+                    return f"({cid}){member.name}"
+        except Exception:
+            pass
+        # Fallback: just the name
+        return member.name
+
+    def _build_enum_display(self, enum_type: type[Enum]) -> tuple[list[Enum], list[str]]:
+        """Return (included_members, option_labels) for a given enum type.
+
+        - Filters out UNKNOWN/INVALID-like members by name.
+        - Applies _format_enum_label to each included member to build the labels.
+        """
+        # Filter out sentinel/invalid entries from enum options
+        excluded = {"UNKNOWN", "INVALID"}
+        try:
+            included_members = [m for m in enum_type if m.name.upper() not in excluded]
+        except Exception:
+            included_members = []
+        option_labels = [self._format_enum_label(enum_type, m) for m in included_members]
+        return included_members, option_labels
+
+    # ------------------------------------------------------------------
+    # Color enum helpers (UI + resolution) for maintainability
+    # ------------------------------------------------------------------
+    def _create_color_swatch(self, parent: tk.Misc, row: int) -> tuple[tk.Widget, ttk.Label]:
+        """Create a fixed-size color swatch and hex label placed at the given grid row.
+
+        Returns (swatch_frame, hex_label).
+        """
+        # Swatch: fixed size for consistent preview, placed in column 3
+        swatch = tk.Frame(parent, relief='solid', borderwidth=1, width=32, height=18)
+        swatch.grid(row=row, column=3, sticky=tk.W, padx=(6, 6), pady=2)
+        try:
+            swatch.grid_propagate(False)
+        except Exception:
+            pass
+        # Hex value label in column 4
+        hex_label = ttk.Label(parent, text="")
+        hex_label.grid(row=row, column=4, sticky=tk.W, padx=(0, 0), pady=2)
+        return swatch, hex_label
+
+    def _update_color_swatch(
+        self,
+        combo: ttk.Combobox,
+        var: tk.Variable,
+        enum_type: type[Enum],
+        swatch: tk.Widget,
+        hex_label: ttk.Label,
+    ) -> None:
+        """Update the color swatch and hex label from the current combobox selection.
+
+        - Prefer combo.get() to avoid timing issues where the StringVar is still '' during
+          the selection event; fall back to var.get() if needed.
+        - Accept labels formatted as '(id)NAME' by normalizing to NAME before lookup.
+        - Resolve the enum member and use its .hex to color the swatch and label; default to white.
+        """
+        # Read latest selection text from the dropdown control
+        try:
+            sel = combo.get()
+        except Exception:
+            sel = ''
+        if not sel:
+            try:
+                sel = var.get()
+            except Exception:
+                sel = ''
+        # Normalize '(id)NAME' to NAME for lookup
+        try:
+            if sel and sel.startswith('(') and ')' in sel:
+                sel = sel.split(')', 1)[1]
+        except Exception:
+            pass
+        # Resolve enum member and extract color hex
+        member = self._coerce_enum_from_selection(enum_type, sel)
+        try:
+            color_hex = getattr(member, 'hex', None)
+        except Exception:
+            color_hex = None
+        if not color_hex or not isinstance(color_hex, str):
+            color_hex = '#FFFFFF'
+        # Apply to UI elements
+        try:
+            swatch.configure(background=color_hex)
+        except Exception:
+            pass
+        try:
+            hex_label.configure(text=color_hex)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def _refresh_form(self) -> None:
@@ -594,7 +771,29 @@ class BaseObjectEntityTab(ttk.Frame):
                             resolved = self._coerce_enum_from_selection(typ, name_part)
                             if resolved is None:
                                 continue
-                            new_val = resolved
+                            # Convert enum to DB-friendly scalar based on enum kind
+                            try:
+                                if issubclass(typ, IntEnum):
+                                    # Store integer value
+                                    new_val = int(resolved)
+                                elif typ is ColorType:
+                                    # Store color id (integer)
+                                    try:
+                                        new_val = int(resolved)  # ColorType.__int__ returns id
+                                    except Exception:
+                                        new_val = getattr(resolved, 'id', None)
+                                elif issubclass(typ, StrEnum):
+                                    # Store string value
+                                    new_val = resolved.value
+                                else:
+                                    # Fallback: store enum name
+                                    new_val = resolved.name
+                            except Exception:
+                                # As a last resort, attempt to store .value
+                                try:
+                                    new_val = resolved.value
+                                except Exception:
+                                    new_val = resolved
                     elif typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
                         new_val = int(raw)
                     elif typ in (float, 'float'):

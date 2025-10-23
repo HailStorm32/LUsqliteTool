@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import List, Dict, Optional
+from enum import Enum
 
 #####################################
 # Types and Constants
@@ -41,6 +42,72 @@ class ItemType(IntEnum):
     VEHICLE             = 22   # A vehicle
     CURRENCY            = 23   # Currency
     MOUNT               = 24   # A mount
+
+class ColorType(Enum):
+    NONE                                    = (INT_NULL, "NULL")
+    BRIGHT_RED                              = (0,   "#de000d")
+    BRIGHT_BLUE                             = (1,   "#0057a8")
+    BRIGHT_YELLOW                           = (2,   "#fec400")
+    DARK_GREEN                              = (3,   "#007b28")
+    BRIGHT_ORANGE                           = (5,   "#e76318")
+    BLACK                                   = (6,   "#323232")
+    DARK_STONE_GREY                         = (7,   "#4c5156")
+    MEDIUM_STONE_GREY                       = (8,   "#9c9191")
+    REDDISH_BROWN                           = (9,   "#5b1c0c")
+    WHITE                                   = (10,  "#f4f4f4")
+    MEDIUM_BLUE                             = (11,  "#478cc6")
+    BRIGHT_YELLOWISH_GREEN                  = (12,  "#94b80a")
+    DARK_RED                                = (13,  "#80081b")
+    EARTH_BLUE                              = (14,  "#002541")
+    EARTH_GREEN                             = (15,  "#003416")
+    BRICK_YELLOW                            = (16,  "#d9ba7a")
+    LIGHT_PURPLE                            = (17,  "#ed9ec2")
+    COOL_YELLOW                             = (18,  "#ffe369")
+    NOUGAT                                  = (19,  "#d67240")
+    NATURE_TRANSPARENT                      = (36,  "#f7d689")
+    BRIGHT_GREEN                            = (42,  "#009624")
+    DARK_ORANGE                             = (43,  "#a83d15")
+    TRANSPARENT                             = (45,  "#eeeeee")
+    TRANSPARENT_RED                         = (46,  "#e02a29")
+    TRANSPARENT_LIGHT_BLUE                  = (47,  "#b6e0ef")
+    TRANSPARENT_BLUE                        = (48,  "#50b1e8")
+    TRANSPARENT_YELLOW                      = (49,  "#f9ef69")
+    TRANSPARENT_FLUORESCENT_REDDISH_ORANGE  = (51,  "#e66645")
+    TRANSPARENT_GREEN                       = (52,  "#61b36e")
+    TRANSPARENT_FLUORESCENT_GREEN           = (53,  "#f7eb59")
+    TRANSPARENT_BROWN                       = (63,  "#bdaba3")
+    TRANSPARENT_MEDIUM_REDDISH_VIOLET       = (65,  "#ee9dc3")
+    LIGHT_YELLOWISH_GREEN                   = (71,  "#d6e38c")
+    BRIGHT_REDDISH_VIOLET                   = (75,  "#9c006b")
+    TRANSPARENT_BRIGHT_BLUISH_VIOLET        = (77,  "#9c94c7")
+    SILVER_PLASTIC                          = (81,  "#8c9494")
+    SAND_BLUE                               = (84,  "#5e748c")
+    SAND_YELLOW                             = (87,  "#8c7552")
+    COPPER                                  = (88,  "#744930")
+    TRANSPARENT_FLUORESCENT_BLUE            = (89,  "#cfe2f7")
+    DARK_GREY_METALLIC                      = (93,  "#47403b")
+    SAND_GREEN                              = (96,  "#5f8265")
+    TRANSPARENT_BRIGHT_ORANGE               = (105, "#ec760e")
+    FLAME_YELLOWISH_ORANGE                  = (113, "#f29900")
+    LIGHT_STONE_GREY                        = (119, "#e3e3d9")
+    LIGHT_ROYAL_BLUE                        = (123, "#87bfeb")
+    BRIGHT_PURPLE                           = (130, "#de378b")
+    MEDIUM_LILAC                            = (142, "#2c1577")
+    FLESH                                   = (143, "#f5c189")
+    PHOSPHORESCENT_WHITE_REPLACE_50         = (146, "#fefcd5")
+    WARM_GOLD                               = (147, "#aa7f2e")
+    LU_METALLIC_SHADER                      = (150, "#9ca3a8")
+    DARK_BROWN_FLESH                        = (151, "#342100")
+
+    def __init__(self, id_value: int, hex_code: str):
+        self.id = id_value
+        self.hex = hex_code
+
+    def __int__(self):
+        return self.id
+
+    def __str__(self):
+        return self.hex
 
 class EquipLocation(StrEnum):
     NONE                = "NULL"
@@ -150,7 +217,7 @@ class ItemComponent:
     req_spec_rank:              int             = 0                     # INT32
     req_achievement_id:         int             = 0                     # INT32
     stack_size:                 int             = 1                     # INT32
-    color1:                     int             = 10                    # INT32 (TODO: map properly)
+    color1:                     ColorType       = ColorType.WHITE       # INT32
     decal:                      Optional[int]   = None                  # INT32
     offset_group_id:            Optional[int]   = None                  # INT32
     build_types:                int             = 0                     # INT32

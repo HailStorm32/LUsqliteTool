@@ -46,6 +46,7 @@ TODO:
    - repository
    - service
    - GUI
+- Pull ColorType values from DB (BrickColors table) instead of hardcoding
 
 
 DestructableCompoent -  DeathBehavior mapping
@@ -54,3 +55,4 @@ DestructableCompoent -  DeathBehavior mapping
 color1 mapping
     https://explorer.lu-dev.net/misc/brick-colors
 """
+
