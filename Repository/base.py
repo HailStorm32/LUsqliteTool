@@ -5,6 +5,13 @@ from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 def _b(x: bool) -> int: return 1 if x else 0 # Convert boolean to int for py -> SQLite
 def _rb(x: Optional[int]) -> bool: return bool(x or 0) # Convert int to boolean for SQLite -> py, treating None as False
 
+# Convert ColorType enum to the int id stored in the DB; pass through existing ints/None
+def _color_id(x: Optional[int | ColorType]) -> Optional[int]:
+    # ColorType is imported at module scope; bind to its integer id for SQLite
+    if isinstance(x, ColorType):
+        return int(x)
+    return x  # Already an int or None
+
 class baseRepository:
     def __init__(self, db_file: str):
         self.__db_file = db_file
@@ -477,7 +484,7 @@ class baseRepository:
                 item_component.item_type, item_component.item_info, _b(item_component.in_loot_table), _b(item_component.in_vendor),
                 _b(item_component.is_unique), _b(item_component.is_bop), _b(item_component.is_boe), item_component.req_flag_id,
                 item_component.req_specialty_id, item_component.req_spec_rank, item_component.req_achievement_id, item_component.stack_size,
-                item_component.color1, item_component.decal, item_component.offset_group_id, item_component.build_types,
+                _color_id(item_component.color1), item_component.decal, item_component.offset_group_id, item_component.build_types,
                 item_component.req_precondition, item_component.animation_flag, item_component.equip_effects, _b(item_component.ready_for_qa),
                 item_component.item_rating, _b(item_component.is_two_handed), item_component.min_num_required, item_component.del_res_index,
                 item_component.currency_lot, item_component.alt_currency_cost, item_component.sub_items, item_component.audio_event_use,
@@ -504,7 +511,7 @@ class baseRepository:
                     item_component.rarity, item_component.item_type, item_component.item_info, _b(item_component.in_loot_table),
                     _b(item_component.in_vendor), _b(item_component.is_unique), _b(item_component.is_bop), _b(item_component.is_boe),
                     item_component.req_flag_id, item_component.req_specialty_id, item_component.req_spec_rank, item_component.req_achievement_id,
-                    item_component.stack_size, item_component.color1, item_component.decal, item_component.offset_group_id,
+                    item_component.stack_size, _color_id(item_component.color1), item_component.decal, item_component.offset_group_id,
                     item_component.build_types, item_component.req_precondition, item_component.animation_flag, item_component.equip_effects,
                     _b(item_component.ready_for_qa), item_component.item_rating, _b(item_component.is_two_handed), item_component.min_num_required,
                     item_component.del_res_index, item_component.currency_lot, item_component.alt_currency_cost, item_component.sub_items,
