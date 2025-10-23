@@ -38,8 +38,6 @@ TODO:
 - Create
    - duplicate existing item
    - add/remove components to existing item by right-clicking in component list
-- Delete item
-   - make common delete button code
 - Scroll fields area will scroll page
 - NPC functionality
    - domains

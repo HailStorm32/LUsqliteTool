@@ -9,23 +9,7 @@ class ItemRepository(baseRepository):
     def __init__(self, db_path: str):
         super().__init__(db_path)
 
-    def generate_new_id(self) -> int:
-        """Generate a new unique object id.
-
-        Strategy: use MAX(id)+1 from Objects table. This keeps ids monotonic and
-        avoids collisions without guessing. Guards against 32-bit overflow.
-        """
-        conn = self._connect_to_db()
-        try:
-            row = conn.execute("SELECT MAX(id) AS max_id FROM Objects").fetchone()
-            max_id = row[0] if row is not None else None
-            new_id = (int(max_id) + 1) if max_id is not None else 1
-            # Basic overflow guard for 32-bit signed range
-            if new_id > 2_147_483_647:
-                raise SaveError("Exhausted id space; cannot create new object id.")
-            return new_id
-        finally:
-            conn.close()
+    # generate_new_id is implemented in baseRepository; inherit for reuse.
 
     def list_items(self, limit: int | None = None) -> list[dict[str, int | str]]:
         """
@@ -39,33 +23,15 @@ class ItemRepository(baseRepository):
         ]
 
         """
-        conn = self._connect_to_db()
-        try:
-            query = "SELECT id,name FROM Objects WHERE type=?"
-            params = (ObjectTypes.ITEM.value,)
-            if limit is not None:
-                query += " LIMIT ?"
-                params += (limit,)
-            rows = conn.execute(query, params).fetchall()
-            return [{'id':row['id'], 'name':row['name']} for row in rows]
-        finally:
-            conn.close()
+        # Delegate to base for shared behavior (keeps this small and consistent)
+        return self.list_objects_by_type(ObjectTypes.ITEM.value, limit)
 
-    ##########################
-    #-------- DELETE ---------
-    ##########################
-    def delete(self, object_id: int) -> None:
-        """Permanently delete an object and all related components (delegates to base)."""
-        super().delete_object(object_id)
-
-    def delete_item_component(self, component_id: int) -> None:
-        super().delete_item_component(component_id)
-
-    def delete_render_component(self, component_id: int) -> None:
-        super().delete_render_component(component_id)
-
-    def delete_skill_component(self, object_id: int) -> None:
-        super().delete_skill_component(object_id)
+    # Delete operations are provided by baseRepository:
+    # - delete(object_id)
+    # - delete_item_component(component_id)
+    # - delete_render_component(component_id)
+    # - delete_skill_component(object_id)
+    # No need to redefine passthroughs here; rely on inherited methods.
 
     ##########################
     #-------- LOAD -----------

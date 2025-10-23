@@ -1,13 +1,112 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import List
+from typing import Any, Callable, Optional, Type, TypeVar
 
 from Domain.domains import Item, ObjectTypes, ItemComponent, RenderComponent
 from Repository.item import ItemRepository
 from Repository.exceptions import *
 
 
-class ItemService:
+# Generic type for domain objects returned by repositories
+T = TypeVar("T")
+
+
+class BaseService:
+    """Common service-layer utilities shared by Item and NPC services.
+
+    Responsibilities:
+    - Construct the underlying repository (_repo).
+    - Provide shared validation and thin orchestration around repository calls.
+    - Centralize common component deletion helpers to avoid duplication.
+
+    Subclasses should pass their repository class into the constructor:
+
+        class ItemService(BaseService):
+            def __init__(self, db_path: Path | str):
+                super().__init__(db_path, ItemRepository)
+
+    Notes for future NPC implementation:
+    - NPCService can follow the same pattern (inject NPCRepository).
+    - Any methods that are domain-agnostic (get/save/delete component helpers)
+      should live here so we don't repeat code.
+    """
+
+    def __init__(self, db_path: Path | str, repo_cls: Optional[Type[Any]]):
+        # Allow a None repo_cls for placeholder services (e.g., NPC until repo exists)
+        self._repo = repo_cls(str(db_path)) if repo_cls is not None else None
+
+    # ------------------------------
+    # Validation helpers
+    # ------------------------------
+    def _require_positive_int(self, value: Any, name: str) -> int:
+        """Ensure value is a positive integer; raise ValueError otherwise."""
+        try:
+            iv = int(value)
+        except Exception:
+            raise ValueError(f"{name} must be a positive unsigned integer")
+        if iv <= 0:
+            raise ValueError(f"{name} must be a positive unsigned integer")
+        return iv
+
+    # ------------------------------
+    # Generic CRUD pass-throughs
+    # ------------------------------
+    def get(self, object_id: int) -> Any | None:
+        """Generic safe get with basic validation and NotFound handling.
+
+        Returns the domain object or None if not found/invalid.
+        """
+        oid = self._require_positive_int(object_id, "Object ID")
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        try:
+            return self._repo.get(oid)
+        except NotFoundError:
+            return None
+        except Exception as e:
+            print(f"Error retrieving object {oid}: {e}")
+            return None
+
+    def save(self, obj: Any) -> None:
+        """Persist a domain object using the underlying repository."""
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        self._repo.save(obj)
+
+    def delete_object(self, object_id: int) -> None:
+        """Delete an object and its related data via the repository base delete path."""
+        oid = self._require_positive_int(object_id, "Object ID")
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        # Repositories expose delete() which delegates to base.delete_object
+        self._repo.delete(oid)
+
+    # ------------------------------
+    # Common component deletion helpers
+    # ------------------------------
+    def delete_item_component(self, component_id: int) -> None:
+        """Permanently delete an ItemComponent and its registry references."""
+        cid = self._require_positive_int(component_id, "Component ID")
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        self._repo.delete_item_component(cid)
+
+    def delete_render_component(self, component_id: int) -> None:
+        """Permanently delete a RenderComponent and its registry references."""
+        cid = self._require_positive_int(component_id, "Component ID")
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        self._repo.delete_render_component(cid)
+
+    def delete_skill_component(self, object_id: int) -> None:
+        """Permanently delete all skills for an object and remove the registry entry."""
+        oid = self._require_positive_int(object_id, "Object ID")
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        self._repo.delete_skill_component(oid)
+
+
+class ItemService(BaseService):
     """High level operations for Item domain objects.
 
     This layer performs orchestration/validation before delegating to the
@@ -16,28 +115,15 @@ class ItemService:
     """
 
     def __init__(self, db_path: Path | str):
-        self._repo = ItemRepository(str(db_path))
+        # BaseService wires up the repository so we don't repeat that here
+        super().__init__(db_path, ItemRepository)
 
     # ------------------------------------------------------------------
     # Retrieval operations
     # ------------------------------------------------------------------
     def get_item(self, object_id: int) -> Item:
         """Return a single item from the database."""
-        if object_id <= 0:
-            print(f"Invalid object ID: {object_id}")
-            return None
-
-        try:
-            item = self._repo.get(object_id)
-
-            return item
-
-        except NotFoundError as e:
-            return None
-
-        except Exception as e:
-            print(f"Error retrieving item {object_id}: {e}")
-            return None
+        return self.get(object_id)
 
     def list_items(self, limit: int | None = None) -> list[dict[str, int | str]]:
         """
@@ -66,7 +152,7 @@ class ItemService:
     # ------------------------------------------------------------------
     def save_item(self, item: Item) -> None:
         """Persist an item using the underlying repository."""
-        self._repo.save(item)
+        self.save(item)
 
     # ------------------------------------------------------------------
     # Creation operations
@@ -125,33 +211,16 @@ class ItemService:
     # ------------------------------------------------------------------
     def delete_item(self, object_id: int) -> None:
         """Permanently delete an item and all of its components from the database."""
-        if not isinstance(object_id, int) or object_id <= 0:
-            raise ValueError("Object ID must be a positive unsigned integer")
-        self._repo.delete(object_id)
-
-    def delete_item_component(self, component_id: int) -> None:
-        """Permanently delete an ItemComponent by its id and remove its registry entry."""
-        if not isinstance(component_id, int) or component_id <= 0:
-            raise ValueError("Component ID must be a positive unsigned integer")
-        self._repo.delete_item_component(component_id)
-
-    def delete_render_component(self, component_id: int) -> None:
-        """Permanently delete a RenderComponent by its id and remove its registry entry."""
-        if not isinstance(component_id, int) or component_id <= 0:
-            raise ValueError("Component ID must be a positive unsigned integer")
-        self._repo.delete_render_component(component_id)
-
-    def delete_skill_component(self, object_id: int) -> None:
-        """Permanently delete all skills for an object and remove the registry entry."""
-        if not isinstance(object_id, int) or object_id <= 0:
-            raise ValueError("Object ID must be a positive unsigned integer")
-        self._repo.delete_skill_component(object_id)
+        self.delete_object(object_id)
 
 
 # Placeholder for future NPCService so the GUI has an obvious insertion point.
-class NPCService:
+class NPCService(BaseService):
     """Service layer for NPC related operations (not yet implemented)."""
 
     def __init__(self, db_path: Path | str):
+        # No NPCRepository yet; wire up base without a repo for now.
+        # When an NPCRepository is added, call: super().__init__(db_path, NPCRepository)
+        super().__init__(db_path, repo_cls=None)
         self.db_path = Path(db_path)
         # Implementation will mirror ItemService when NPC repositories exist.

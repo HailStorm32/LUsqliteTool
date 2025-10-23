@@ -15,6 +15,49 @@ class baseRepository:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
+    ############################
+    #-------- COMMON UTILS -----
+    ############################
+    def generate_new_id(self) -> int:
+        """Generate a new unique object ID from the Objects table.
+
+        Strategy: MAX(id)+1 with a guard for 32-bit signed range. This approach matches
+        how the LU client DB behaves (no autoincrement) and is shared across object types
+        (Items, NPCs, etc.), so it lives in the base repo for reuse.
+        """
+        conn = self._connect_to_db()
+        try:
+            row = conn.execute("SELECT MAX(id) AS max_id FROM Objects").fetchone()
+            max_id = row["max_id"] if row is not None else None
+            new_id = (int(max_id) + 1) if max_id is not None else 1
+            # Basic overflow guard for 32-bit signed range
+            if new_id > 2_147_483_647:
+                raise SaveError("Exhausted id space; cannot create new object id.")
+            return new_id
+        finally:
+            conn.close()
+
+    def list_objects_by_type(self, type_value: str, limit: int | None = None) -> list[dict[str, int | str]]:
+        """List object ids and names for a given Objects.type value.
+
+        Parameters:
+            type_value: The exact value stored in Objects.type (e.g., ObjectTypes.ITEM.value).
+            limit: Optional maximum number of rows to return.
+
+        Returns: List of dicts with keys: id (int), name (str)
+        """
+        conn = self._connect_to_db()
+        try:
+            query = "SELECT id, name FROM Objects WHERE type=?"
+            params: tuple = (type_value,)
+            if limit is not None:
+                query += " LIMIT ?"
+                params += (limit,)
+            rows = conn.execute(query, params).fetchall()
+            return [{"id": row["id"], "name": row["name"]} for row in rows]
+        finally:
+            conn.close()
+
     def __get_row_count(self, table: str, value: int, column: str = "id") -> int:
         """Returns the number of rows in a table where a specific column matches a value"""
         conn = self._connect_to_db()
@@ -30,6 +73,14 @@ class baseRepository:
     ############################
     #-------- DELETE -----------
     ############################
+    def delete(self, object_id: int) -> None:
+        """Public deletion API: remove an object and all of its related data.
+
+        This simply delegates to delete_object for clarity/compatibility so
+        concrete repositories don't need to re-declare a passthrough.
+        """
+        self.delete_object(object_id)
+
     def delete_object(self, object_id: int) -> None:
         """Permanently delete an object and all related components.
 
