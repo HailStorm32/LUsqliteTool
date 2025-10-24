@@ -44,6 +44,32 @@ class baseRepository:
         finally:
             conn.close()
 
+    def generate_new_component_id(self, preferred_id: int, table: str) -> int:
+        """Generate a new unique component id for a table, preferring a starting id.
+
+        Logic requested: try the object's id first; if that id already exists in the
+        component table, choose the next available id by incrementing until free.
+        Guards against exceeding 32-bit signed integer max.
+        """
+        if not isinstance(preferred_id, int) or preferred_id <= 0:
+            raise ValueError("preferred_id must be a positive integer")
+        if not table or not isinstance(table, str):
+            raise ValueError("table must be a non-empty string")
+
+        conn = self._connect_to_db()
+        try:
+            candidate = int(preferred_id)
+            while True:
+                row = conn.execute(f"SELECT 1 FROM {table} WHERE id=? LIMIT 1", (candidate,)).fetchone()
+                if row is None:
+                    # Free id found
+                    return candidate
+                candidate += 1
+                if candidate > 2_147_483_647:
+                    raise SaveError(f"Exhausted id space while generating new id for {table} starting from {preferred_id}")
+        finally:
+            conn.close()
+
     def list_objects_by_type(self, type_value: str, limit: int | None = None) -> list[dict[str, int | str]]:
         """List object ids and names for a given Objects.type value.
 
@@ -664,3 +690,17 @@ class baseRepository:
             "DELETE FROM ObjectSkills WHERE objectTemplate=?",
             (object_template,)
         )
+
+    def id_exists(self, table: str, id_value: int, column: str = "id") -> bool:
+        """Return True if a row with the given id exists in table."""
+        if not table or not isinstance(table, str):
+            raise ValueError("table must be a non-empty string")
+        conn = self._connect_to_db()
+        try:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE {column}=? LIMIT 1",
+                (id_value,)
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()

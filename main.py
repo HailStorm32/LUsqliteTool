@@ -36,7 +36,6 @@ if __name__ == "__main__":
 """
 TODO:
 - Create
-   - duplicate existing item
    - add/remove components to existing item by right-clicking in component list
 - Scroll fields area will scroll page
 - NPC functionality

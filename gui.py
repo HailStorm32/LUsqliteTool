@@ -1454,7 +1454,7 @@ class ItemsTab(BaseObjectEntityTab):
         # Left sidebar --------------------------------------------------
         sidebar = ttk.Frame(paned, width=260)  # initial width hint
 
-        # Create row: optional ID entry + Create button
+        # Create row: optional ID entry + Create button + Duplicate button
         create_row = ttk.Frame(sidebar)
         create_row.pack(fill=tk.X, padx=5, pady=(6, 2))
         ttk.Label(create_row, text="ID:").pack(side=tk.LEFT)
@@ -1465,6 +1465,10 @@ class ItemsTab(BaseObjectEntityTab):
 
         create_btn = ttk.Button(create_row, text="Create", command=self._on_create_item)
         create_btn.pack(side=tk.LEFT, padx=(4, 0))
+
+        dup_btn = ttk.Button(create_row, text="Duplicate", command=self._on_duplicate_item)
+        dup_btn.pack(side=tk.LEFT, padx=(4, 0))
+        self._add_tooltip(dup_btn, "Duplicate the selected item. Uses the ID field if provided; otherwise auto-assigns.")
 
         # Undo local deletes button
         undo_row = ttk.Frame(sidebar)
@@ -1574,6 +1578,24 @@ class ItemsTab(BaseObjectEntityTab):
     # --------------------------------------------------------------
     # Actions
     # --------------------------------------------------------------
+    def _parse_optional_id_from_entry(self) -> int | None:
+        """Parse the optional ID entry used by create/duplicate.
+
+        Returns an int or None when empty. Validates positive 32-bit signed range.
+        Raises ValueError with a user-readable message for invalid input.
+        """
+        raw_id = (self.create_id_var.get() or "").strip() if hasattr(self, 'create_id_var') else ""
+        if raw_id == "":
+            return None
+        if not raw_id.isdigit():
+            raise ValueError("ID must be an unsigned integer (digits only).")
+        provided_id = int(raw_id)
+        if provided_id <= 0:
+            raise ValueError("ID must be a positive unsigned integer.")
+        if provided_id > 2_147_483_647:
+            raise ValueError("ID exceeds 32-bit signed integer maximum (2147483647).")
+        return provided_id
+
     def _on_create_item(self) -> None:
         """Create a brand new item with default components and select it in the tree.
 
@@ -1582,21 +1604,11 @@ class ItemsTab(BaseObjectEntityTab):
         """
         try:
             # Parse optional ID from entry; ensure unsigned integer if provided
-            raw_id = (self.create_id_var.get() or "").strip() if hasattr(self, 'create_id_var') else ""
-            provided_id: int | None
-            if raw_id == "":
-                provided_id = None
-            else:
-                if not raw_id.isdigit():
-                    messagebox.showerror("Invalid ID", "ID must be an unsigned integer (digits only).")
-                    return
-                provided_id = int(raw_id)
-                if provided_id <= 0:
-                    messagebox.showerror("Invalid ID", "ID must be a positive unsigned integer.")
-                    return
-                if provided_id > 2_147_483_647:
-                    messagebox.showerror("Invalid ID", "ID exceeds 32-bit signed integer maximum (2147483647).")
-                    return
+            try:
+                provided_id = self._parse_optional_id_from_entry()
+            except ValueError as ve:
+                messagebox.showerror("Invalid ID", str(ve))
+                return
 
             # Ask service to create and persist a default item
             new_item = self._service.create_default_item(provided_id)
@@ -1632,6 +1644,65 @@ class ItemsTab(BaseObjectEntityTab):
 
         except Exception as exc:
             messagebox.showerror("Create failed", str(exc))
+
+    def _on_duplicate_item(self) -> None:
+        """Duplicate the currently selected item to a new ID (optional ID entry)."""
+        # Determine selected source item id (use parent iid if a child is selected)
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showerror("Duplicate failed", "Select an item to duplicate from the list.")
+            return
+        iid = sel[0]
+        parent_iid = iid.split(":", 1)[0] if ":" in iid else iid
+        try:
+            src_id = int(parent_iid.split("-", 1)[1])
+        except Exception:
+            messagebox.showerror("Duplicate failed", "Unable to determine selected item id.")
+            return
+
+        # Parse optional destination id using same rules as Create
+        try:
+            dest_id = self._parse_optional_id_from_entry()
+        except ValueError as ve:
+            messagebox.showerror("Invalid ID", str(ve))
+            return
+
+        try:
+            dup = self._service.duplicate_item(src_id, dest_id)
+        except Exception as exc:
+            messagebox.showerror("Duplicate failed", str(exc))
+            return
+
+        if not dup:
+            messagebox.showerror("Duplicate failed", "Could not duplicate item.")
+            return
+
+        # Clear the ID entry after successful creation/duplication to avoid accidental reuse
+        try:
+            self.create_id_var.set("")
+        except Exception:
+            pass
+
+        # Invalidate cached list data and reload
+        self._list_data = []
+        self._object_cache.pop(dup.object_id, None)
+        self._rebuild_list_tree()
+
+        # Select the new item and open its object form
+        candidate_iids = [self._make_root_iid(dup.object_id), self._make_root_iid_alt(dup.object_id)]
+        target_iid = next((iid for iid in candidate_iids if self.tree.exists(iid)), None)
+        if target_iid is not None:
+            try:
+                self.tree.selection_set(target_iid)
+                self.tree.focus(target_iid)
+                self.tree.see(target_iid)
+                self.current_object = dup
+                self.current_component_type = "object"
+                self._build_form_for("object")
+            except Exception:
+                pass
+        else:
+            messagebox.showinfo("Item duplicated", f"Created item {dup.object_id}.")
 
     # --------------------------------------------------------------
     # Context menu: delete (local) root items and skill subitems

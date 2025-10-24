@@ -2,14 +2,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional, Type, TypeVar
 
-from Domain.domains import Item, ObjectTypes, ItemComponent, RenderComponent
+from Domain.domains import Item, ObjectTypes, ItemComponent, RenderComponent, ObjectSkills, ObjectSkillRow
 from Repository.item import ItemRepository
 from Repository.exceptions import *
-
-
-# Generic type for domain objects returned by repositories
-T = TypeVar("T")
-
 
 class BaseService:
     """Common service-layer utilities shared by Item and NPC services.
@@ -184,15 +179,19 @@ class ItemService(BaseService):
         else:
             new_id = self._repo.generate_new_id()
 
+        # Generate component ids: try to use object id, else next available in each table
+        item_comp_id = self._repo.generate_new_component_id(new_id, "ItemComponent")
+        render_comp_id = self._repo.generate_new_component_id(new_id, "RenderComponent")
+
         # Construct domain object and components with defaults
         item = Item(id=new_id, type=ObjectTypes.ITEM)
         # Mark base object dirty so it inserts/updates
         item.dirty = True
 
         # Attach default RenderComponent and ItemComponent; mark dirty so they are saved
-        render = RenderComponent(id=new_id)
+        render = RenderComponent(id=render_comp_id)
         render.dirty = True
-        item_comp = ItemComponent(id=new_id)
+        item_comp = ItemComponent(id=item_comp_id)
         item_comp.dirty = True
         item.components = {
             "RenderComponent": render,
@@ -205,6 +204,123 @@ class ItemService(BaseService):
         # Reload to ensure any repo-side normalization is reflected (optional but safer)
         saved = self._repo.get(new_id)
         return saved or item
+
+    def duplicate_item(self, source_object_id: int, target_object_id: int | None = None) -> Item:
+        """Duplicate an existing item (and its components) to a new object id.
+
+        - Copies GameObject fields (name, description, etc.)
+        - Copies present components and keeps all values the same
+        - Assigns NEW component ids for the duplicate using the rule:
+          try object id first; if already used in that component table, pick the next free id
+        - Duplicates skills so their objectTemplate points to the new id
+
+        If target_object_id is None, a new id is generated. When provided, the number
+        must be a positive integer and not already present in Objects.
+        """
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+
+        # Validate and fetch the source item
+        src_id = self._require_positive_int(source_object_id, "Source Object ID")
+        try:
+            src = self._repo.get(src_id)
+        except NotFoundError:
+            raise ValueError(f"Source item {src_id} does not exist")
+
+        # Choose/validate destination id (reuse same rules as create)
+        if target_object_id is not None:
+            if not isinstance(target_object_id, int) or target_object_id <= 0:
+                raise ValueError("Target Object ID must be a positive unsigned integer")
+            # Ensure destination does not already exist
+            try:
+                existing = self._repo.get(target_object_id)
+                if existing is not None:
+                    raise ValueError(f"Target Object ID {target_object_id} already exists")
+            except NotFoundError:
+                pass
+            new_id = target_object_id
+        else:
+            new_id = self._repo.generate_new_id()
+
+        # Pre-compute component ids following requested logic
+        new_item_comp_id = self._repo.generate_new_component_id(new_id, "ItemComponent")
+        new_render_comp_id = self._repo.generate_new_component_id(new_id, "RenderComponent")
+
+        # Build new domain object, copying base object fields
+        dup = Item(id=new_id, type=ObjectTypes.ITEM, name=src.name)
+        # Copy remaining GameObject attributes (explicit for clarity/maintainability)
+        dup.placeable = bool(getattr(src, 'placeable', False))
+        dup.description = getattr(src, 'description', '')
+        dup.localize = getattr(src, 'localize', True)
+        dup.npc_template_id = getattr(src, 'npc_template_id', None)
+        dup.display_name = getattr(src, 'display_name', None)
+        dup.interaction_distance = getattr(src, 'interaction_distance', None)
+        dup.nametag = getattr(src, 'nametag', False)
+        dup.internal_notes = getattr(src, 'internal_notes', None)
+        dup.loc_status = getattr(src, 'loc_status', None)
+        dup.gate_version = getattr(src, 'gate_version', None)
+        dup.hq_valid = getattr(src, 'hq_valid', True)
+        dup.dirty = True  # ensure Objects row is written
+
+        # Duplicate components present on the source (assign fresh ids)
+        comps: dict[str, Any] = {}
+
+        # Helper: copy dataclass attributes by name (excluding 'id'/'dirty')
+        def _copy_fields(src_obj, dst_obj):
+            for attr in vars(src_obj).keys():
+                if attr in ("id", "dirty"):
+                    continue
+                try:
+                    setattr(dst_obj, attr, getattr(src_obj, attr))
+                except Exception:
+                    # Best-effort; skip attributes that aren't compatible
+                    pass
+
+        src_item_comp = getattr(src.components, 'get', lambda _x: None)('ItemComponent')
+        if src_item_comp is not None:
+            new_ic = ItemComponent(id=new_item_comp_id)
+            _copy_fields(src_item_comp, new_ic)
+            new_ic.id = new_item_comp_id
+            new_ic.dirty = True
+            comps['ItemComponent'] = new_ic
+
+        src_render = getattr(src.components, 'get', lambda _x: None)('RenderComponent')
+        if src_render is not None:
+            new_rc = RenderComponent(id=new_render_comp_id)
+            _copy_fields(src_render, new_rc)
+            new_rc.id = new_render_comp_id
+            new_rc.dirty = True
+            comps['RenderComponent'] = new_rc
+
+        src_skills = getattr(src.components, 'get', lambda _x: None)('ObjectSkill')
+        if src_skills is not None and hasattr(src_skills, 'skills'):
+            # Duplicate skills rows, retargeting object_Template to the new id
+            new_rows: list[ObjectSkillRow] = []
+            for row in getattr(src_skills, 'skills', []) or []:
+                try:
+                    new_rows.append(
+                        ObjectSkillRow(
+                            object_Template=new_id,
+                            skill_id=getattr(row, 'skill_id', None),
+                            cast_on_type=getattr(row, 'cast_on_type', None),
+                            ai_combat_weight=getattr(row, 'ai_combat_weight', None),
+                        )
+                    )
+                except Exception:
+                    # Skip malformed rows
+                    pass
+            if new_rows:
+                new_skills = ObjectSkills(skills=new_rows, zero_component_id=getattr(src_skills, 'zero_component_id', True))
+                new_skills.dirty = True
+                comps['ObjectSkill'] = new_skills
+
+        dup.components = comps
+
+        # Persist new item
+        self._repo.save(dup)
+        # Reload the freshly saved duplicate and return it
+        saved = self._repo.get(new_id)
+        return saved or dup
 
     # ------------------------------------------------------------------
     # Deletion operations
