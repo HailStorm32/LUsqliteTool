@@ -35,7 +35,6 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Move right click menu to base class but have child classes define menu items
 - Scroll fields area will scroll page
 - Implement actual logging instead of print statements
 - NPC functionality
