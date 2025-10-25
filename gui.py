@@ -1727,7 +1727,7 @@ class ItemsTab(BaseObjectEntityTab):
         except Exception:
             pass
 
-    # Build a minimal context menu depending on node type
+    # Build a context menu depending on node type
         menu = tk.Menu(self.tree, tearoff=0)
 
         # Distinguish node kinds by iid structure
@@ -1735,6 +1735,28 @@ class ItemsTab(BaseObjectEntityTab):
         is_root = (":" not in iid)
         is_child = (":" in iid and len(parts) == 2)
         is_grandchild = (":" in iid and len(parts) == 3)
+
+        # Helpers ----------------------------------------------------
+        def _parse_obj_id(root_iid: str) -> int | None:
+            try:
+                return int(root_iid.split('-', 1)[1])
+            except Exception:
+                return None
+
+        def _get_cached_or_load(obj_id: int):
+            obj = self._object_cache.get(obj_id)
+            if obj is None:
+                try:
+                    obj = self._service.get_item(int(obj_id))
+                    if obj is not None:
+                        self._object_cache[obj_id] = obj
+                except Exception:
+                    obj = None
+            return obj
+
+        def _mark_unsaved_and_refresh_indicator():
+            self._has_unsaved_changes = True
+            self._update_unsaved_indicator()
 
         # Root: allow local delete (remove from view; will be permanently deleted on Save)
         if is_root:
@@ -1766,8 +1788,7 @@ class ItemsTab(BaseObjectEntityTab):
                 except Exception:
                     pass
                 # Mark unsaved change so user knows to Save to persist deletion
-                self._has_unsaved_changes = True
-                self._update_unsaved_indicator()
+                _mark_unsaved_and_refresh_indicator()
                 self._update_undo_button_state()
                 # Clear form if we deleted the currently viewed object
                 sel = self.tree.selection()
@@ -1779,6 +1800,109 @@ class ItemsTab(BaseObjectEntityTab):
                 # Reflect local change in the left list immediately
                 self._rebuild_list_tree()
             menu.add_command(label="Delete item (local)", command=_delete_root_local)
+
+            # Add Component cascade for root nodes ------------------
+            # Build submenu with eligible components for ITEM objects.
+            add_menu = tk.Menu(menu, tearoff=0)
+            obj_id = _parse_obj_id(iid)
+            obj = _get_cached_or_load(obj_id) if obj_id is not None else None
+            existing = set(getattr(getattr(obj, 'components', {}), 'keys', lambda: [])()) if obj else set()
+
+            # Define available components for items (future-proof for NPC)
+            # Map: menu label -> internal component key
+            item_components: list[tuple[str, str]] = [
+                ("Item Component", "ItemComponent"),
+                ("Render Component", "RenderComponent"),
+                ("Skills", "ObjectSkill"),
+            ]
+
+            def _add_item_component():
+                if obj is None:
+                    return
+                comp = self._service.add_item_component(obj)
+                # Insert child node if not present
+                child_iid = f"{iid}:ItemComponent"
+                if not self.tree.exists(child_iid):
+                    try:
+                        self.tree.insert(iid, tk.END, iid=child_iid, text="ItemComponent")
+                    except Exception:
+                        pass
+                _mark_unsaved_and_refresh_indicator()
+                # Select the new component for immediate editing
+                try:
+                    self.tree.selection_set(child_iid)
+                    self.tree.focus(child_iid)
+                    self.current_object = obj
+                    self.current_component_type = "ItemComponent"
+                    self._build_form_for("ItemComponent")
+                except Exception:
+                    pass
+
+            def _add_render_component():
+                if obj is None:
+                    return
+                comp = self._service.add_render_component(obj)
+                child_iid = f"{iid}:RenderComponent"
+                if not self.tree.exists(child_iid):
+                    try:
+                        self.tree.insert(iid, tk.END, iid=child_iid, text="RenderComponent")
+                    except Exception:
+                        pass
+                _mark_unsaved_and_refresh_indicator()
+                try:
+                    self.tree.selection_set(child_iid)
+                    self.tree.focus(child_iid)
+                    self.current_object = obj
+                    self.current_component_type = "RenderComponent"
+                    self._build_form_for("RenderComponent")
+                except Exception:
+                    pass
+
+            def _add_skill_from_root():
+                if obj is None:
+                    return
+                # Ensure skills component and add one blank row
+                new_row = self._service.add_blank_skill(obj)
+                # Ensure ObjectSkill node exists
+                skill_parent_iid = f"{iid}:ObjectSkill"
+                if not self.tree.exists(skill_parent_iid):
+                    try:
+                        self.tree.insert(iid, tk.END, iid=skill_parent_iid, text="ObjectSkill")
+                    except Exception:
+                        pass
+                # Add the new skill row as a grandchild
+                skill_iid = f"{skill_parent_iid}:{getattr(new_row, 'skill_id', '')}"
+                if not self.tree.exists(skill_iid):
+                    try:
+                        self.tree.insert(skill_parent_iid, tk.END, iid=skill_iid, text=f"Skill {getattr(new_row, 'skill_id', '')}")
+                    except Exception:
+                        pass
+                # Expand skills node and select new skill for editing
+                try:
+                    self.tree.item(skill_parent_iid, open=True)
+                    self.tree.selection_set(skill_iid)
+                    self.tree.focus(skill_iid)
+                    self.current_object = obj
+                    self.current_component_type = "ObjectSkill"
+                    self._last_grandchild_iid = str(getattr(new_row, 'skill_id', ''))
+                    self._build_form_for("ObjectSkill", self._last_grandchild_iid)
+                except Exception:
+                    pass
+                _mark_unsaved_and_refresh_indicator()
+
+            # Populate submenu with enable/disable states (skills allowed always)
+            # Item Component
+            state_ic = (tk.DISABLED if "ItemComponent" in existing else tk.NORMAL)
+            add_menu.add_command(label="Item Component", command=_add_item_component, state=state_ic)
+            # Render Component
+            state_rc = (tk.DISABLED if "RenderComponent" in existing else tk.NORMAL)
+            add_menu.add_command(label="Render Component", command=_add_render_component, state=state_rc)
+            # Skills (always allow – creates component if missing, otherwise adds a new row)
+            add_menu.add_command(label="Skill", command=_add_skill_from_root)
+
+            # Attach cascade only if we're on an item root (future: NPC different options)
+            if obj is not None:
+                menu.add_cascade(label="Add Component", menu=add_menu)
 
         # Component child: allow removing an entire component (persisted on save)
         if is_child:
@@ -1882,6 +2006,37 @@ class ItemsTab(BaseObjectEntityTab):
             # Only show delete for known component nodes
             if parts[1] in ('ItemComponent', 'RenderComponent', 'ObjectSkill'):
                 menu.add_command(label="Delete component (local)", command=_delete_component_local)
+
+            # If right-clicking on ObjectSkill component node, allow adding a blank skill
+            if comp_name == 'ObjectSkill':
+                def _add_skill_under_component():
+                    obj_id = _parse_obj_id(parent_iid)
+                    if obj_id is None:
+                        return
+                    obj = _get_cached_or_load(obj_id)
+                    if obj is None:
+                        return
+                    new_row = self._service.add_blank_skill(obj)
+                    # Insert the new grandchild node
+                    skill_parent_iid = iid
+                    skill_iid = f"{skill_parent_iid}:{getattr(new_row, 'skill_id', '')}"
+                    if not self.tree.exists(skill_iid):
+                        try:
+                            self.tree.insert(skill_parent_iid, tk.END, iid=skill_iid, text=f"Skill {getattr(new_row, 'skill_id', '')}")
+                        except Exception:
+                            pass
+                    try:
+                        self.tree.item(skill_parent_iid, open=True)
+                        self.tree.selection_set(skill_iid)
+                        self.tree.focus(skill_iid)
+                        self.current_object = obj
+                        self.current_component_type = 'ObjectSkill'
+                        self._last_grandchild_iid = str(getattr(new_row, 'skill_id', ''))
+                        self._build_form_for('ObjectSkill', self._last_grandchild_iid)
+                    except Exception:
+                        pass
+                    _mark_unsaved_and_refresh_indicator()
+                menu.add_command(label="Add skill", command=_add_skill_under_component)
 
         # Skill grandchild: allow removing a single skill row (persisted on save)
         if is_grandchild:

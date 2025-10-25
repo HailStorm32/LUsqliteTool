@@ -35,8 +35,7 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Create
-   - add/remove components to existing item by right-clicking in component list
+- Move right click menu to base class but have child classes define menu items
 - Scroll fields area will scroll page
 - NPC functionality
    - domains

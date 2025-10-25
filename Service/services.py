@@ -2,7 +2,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional, Type, TypeVar
 
-from Domain.domains import Item, ObjectTypes, ItemComponent, RenderComponent, ObjectSkills, ObjectSkillRow
+from Domain.domains import (
+    Item,
+    ObjectTypes,
+    ItemComponent,
+    RenderComponent,
+    ObjectSkills,
+    ObjectSkillRow,
+    INT_32_MAX,
+)
 from Repository.item import ItemRepository
 from Repository.exceptions import *
 
@@ -99,6 +107,19 @@ class BaseService:
         if self._repo is None:
             raise RuntimeError("Repository not configured for this service")
         self._repo.delete_skill_component(oid)
+
+    # ------------------------------
+    # Component id helpers (exposed for UI orchestration)
+    # ------------------------------
+    def generate_new_component_id(self, preferred_id: int, table: str) -> int:
+        """Generate a new component id, preferring the object's id when possible.
+
+        Delegates to the repository implementation. Public so the GUI can
+        request ids without reaching into repository internals.
+        """
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        return self._repo.generate_new_component_id(preferred_id, table)
 
 
 class ItemService(BaseService):
@@ -328,6 +349,79 @@ class ItemService(BaseService):
     def delete_item(self, object_id: int) -> None:
         """Permanently delete an item and all of its components from the database."""
         self.delete_object(object_id)
+
+    # ------------------------------------------------------------------
+    # Component add helpers (used by GUI context menu)
+    # ------------------------------------------------------------------
+    def add_item_component(self, item: Item) -> ItemComponent:
+        """Attach a new ItemComponent to the given item (no-op if already present).
+
+        Creates a fresh component id using the requested policy, marks it
+        dirty so Save will persist, and returns the component reference.
+        """
+        if item.components.get("ItemComponent") is not None:
+            return item.components["ItemComponent"]  # type: ignore[index]
+        comp_id = self.generate_new_component_id(item.object_id, "ItemComponent")
+        comp = ItemComponent(id=comp_id)
+        comp.dirty = True
+        item.components["ItemComponent"] = comp
+        return comp
+
+    def add_render_component(self, item: Item) -> RenderComponent:
+        """Attach a new RenderComponent to the given item (no-op if already present)."""
+        if item.components.get("RenderComponent") is not None:
+            return item.components["RenderComponent"]  # type: ignore[index]
+        comp_id = self.generate_new_component_id(item.object_id, "RenderComponent")
+        comp = RenderComponent(id=comp_id)
+        comp.dirty = True
+        item.components["RenderComponent"] = comp
+        return comp
+
+    def ensure_skills_component(self, item: Item) -> ObjectSkills:
+        """Ensure the item has an ObjectSkills component; create if missing.
+
+        Returns the ObjectSkills component. Newly created components are marked
+        dirty so Save will persist a registry entry and any rows added.
+        """
+        skills = item.components.get("ObjectSkill")
+        if isinstance(skills, ObjectSkills):
+            return skills
+        skills = ObjectSkills(skills=[], zero_component_id=True)
+        skills.dirty = True
+        item.components["ObjectSkill"] = skills
+        return skills
+
+    def _next_blank_skill_id(self, used: set[int]) -> int:
+        """Pick a placeholder skill_id not already in use.
+
+        Start from INT_32_MAX and decrement until free, but stop at 1.
+        This avoids colliding when the user adds multiple blank rows.
+        """
+        candidate = INT_32_MAX
+        while candidate in used and candidate > 1:
+            candidate -= 1
+        return candidate
+
+    def make_blank_skill_row(self, object_id: int, used_ids: Optional[set[int]] = None) -> ObjectSkillRow:
+        """Create a blank ObjectSkillRow for the given object id with a unique placeholder id."""
+        used_ids = used_ids or set()
+        sid = self._next_blank_skill_id(used_ids)
+        return ObjectSkillRow(
+            object_Template=object_id,
+            skill_id=sid,
+            cast_on_type=1,
+            ai_combat_weight=None,
+        )
+
+    def add_blank_skill(self, item: Item) -> ObjectSkillRow:
+        """Append a blank skill row to the item's ObjectSkills component (creating it if absent)."""
+        skills = self.ensure_skills_component(item)
+        used = {getattr(r, "skill_id", 0) for r in (skills.skills or [])}
+        row = self.make_blank_skill_row(item.object_id, used)
+        skills.skills.append(row)
+        # Mark skills dirty so save will persist new row(s)
+        skills.dirty = True
+        return row
 
 
 # Placeholder for future NPCService so the GUI has an obvious insertion point.
