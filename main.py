@@ -36,6 +36,7 @@ if __name__ == "__main__":
 """
 TODO:
 - Move right click menu to base class but have child classes define menu items
+- If 
 - Scroll fields area will scroll page
 - NPC functionality
    - domains
@@ -50,5 +51,8 @@ DestructableCompoent -  DeathBehavior mapping
 
 color1 mapping
     https://explorer.lu-dev.net/misc/brick-colors
+
+
+    Add the following functionality. Keep readability and maintainability in mind and be sure to leave comments. Also keep in mind to try to commonize when possible to reduce duplicate code when NPC objects are added
 """
 

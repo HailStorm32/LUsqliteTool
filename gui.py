@@ -36,11 +36,196 @@ class BaseObjectEntityTab(ttk.Frame):
         # Unsaved changes state (UI indicator updated via _update_unsaved_indicator)
         self._has_unsaved_changes = False
 
-    # --- abstract methods to be implemented by subclasses ---
-    # def _build_form_for(self, component_kind: str) -> None:
-    #     raise NotImplementedError()
-    # def _on_save(self, persist: bool = True) -> None:
-    #     raise NotImplementedError()
+    # ------------------------------------------------------------------
+    # Context menu (right-click) core – delegated to subclasses via hooks
+    # ------------------------------------------------------------------
+    def _on_tree_context_menu(self, event: tk.Event) -> None:
+        """Generic right-click handler for the left tree.
+
+        The base builds the context menu shell (root/component/grandchild cases)
+        and delegates item-specific options to subclass hooks:
+          - get_root_delete_label() -> str
+          - on_delete_root_local(obj_id: int, iid: str) -> None
+          - get_root_add_component_actions(obj) -> list[(label, callback, enabled)]
+          - get_component_delete_action(comp_name, obj, iid, parent_iid) -> (label, cb)|None
+          - get_component_add_subitem_actions(comp_name, obj, iid, parent_iid) -> list[(label, cb)]
+          - get_grandchild_delete_action(parts, obj) -> (label, cb)|None
+        Subclasses should use base helpers like _parse_obj_id_from_iid(),
+        _get_cached_or_load(), and _mark_unsaved_indicator() inside callbacks.
+        """
+        if not hasattr(self, 'tree'):
+            return
+
+        # Ensure the row under the cursor is selected
+        iid = self.tree.identify_row(event.y)  # type: ignore[attr-defined]
+        if not iid:
+            return
+        try:
+            self.tree.selection_set(iid)
+        except Exception:
+            pass
+
+        menu = tk.Menu(self.tree, tearoff=0)  # type: ignore[arg-type]
+        parts = str(iid).split(":")
+        is_root = (":" not in iid)
+        is_child = (":" in iid and len(parts) == 2)
+        is_grandchild = (":" in iid and len(parts) == 3)
+
+        # ---------------- Helpers used by subclass callbacks ----------------
+        # Expose as attributes so lambdas from hooks can reuse them
+        def _parse_obj_id_from_iid(root_iid: str) -> int | None:
+            try:
+                return int(root_iid.split('-', 1)[1])
+            except Exception:
+                return None
+        def _get_cached_or_load(parent_iid: str, obj_id: int):
+            cached = self._object_cache.get(obj_id)
+            if cached is not None:
+                return cached
+            try:
+                obj = self.__load_relevant_object(parent_iid, obj_id)
+                if obj is not None:
+                    self._object_cache[obj_id] = obj
+                return obj
+            except Exception:
+                return None
+        def _mark_unsaved_indicator() -> None:
+            self._has_unsaved_changes = True
+            self._update_unsaved_indicator()
+            # Some actions enable undo
+            try:
+                self._update_undo_button_state()
+            except Exception:
+                pass
+        # Attach for subclass access
+        self._ctx_parse_obj_id_from_iid = _parse_obj_id_from_iid  # type: ignore[attr-defined]
+        self._ctx_get_cached_or_load = _get_cached_or_load        # type: ignore[attr-defined]
+        self._ctx_mark_unsaved_indicator = _mark_unsaved_indicator # type: ignore[attr-defined]
+
+        # ---------------- Root node actions ----------------
+        if is_root:
+            # Delete root (local)
+            try:
+                del_label = self.get_root_delete_label()
+            except Exception:
+                del_label = None
+            if del_label:
+                def _do_root_delete():
+                    oid = _parse_obj_id_from_iid(iid)
+                    if oid is None:
+                        return
+                    try:
+                        self.on_delete_root_local(oid, iid)
+                    finally:
+                        _mark_unsaved_indicator()
+                try:
+                    menu.add_command(label=del_label, command=_do_root_delete)
+                except Exception:
+                    pass
+
+            # Add Component submenu provided by subclass
+            obj_id = _parse_obj_id_from_iid(iid)
+            obj = _get_cached_or_load(iid, obj_id) if obj_id is not None else None
+            try:
+                actions = self.get_root_add_component_actions(obj)
+            except Exception:
+                actions = []
+            if actions:
+                add_menu = tk.Menu(menu, tearoff=0)
+                for label, cb, enabled in actions:
+                    state = (tk.NORMAL if enabled else tk.DISABLED)
+                    try:
+                        add_menu.add_command(label=label, command=cb, state=state)
+                    except Exception:
+                        pass
+                try:
+                    menu.add_cascade(label="Add Component", menu=add_menu)
+                except Exception:
+                    pass
+
+        # ---------------- Component (child) actions ----------------
+        if is_child:
+            parent_iid = parts[0]
+            comp_name = parts[1]
+            obj_id = _parse_obj_id_from_iid(parent_iid)
+            obj = _get_cached_or_load(parent_iid, obj_id) if obj_id is not None else None
+            # Delete component provided by subclass
+            try:
+                delete_action = self.get_component_delete_action(comp_name, obj, iid, parent_iid)
+            except Exception:
+                delete_action = None
+            if delete_action:
+                label, cb = delete_action
+                try:
+                    menu.add_command(label=label, command=cb)
+                except Exception:
+                    pass
+            # Add sub-items under component (e.g., add skill row)
+            try:
+                add_subs = self.get_component_add_subitem_actions(comp_name, obj, iid, parent_iid)
+            except Exception:
+                add_subs = []
+            for label, cb in (add_subs or []):
+                try:
+                    menu.add_command(label=label, command=cb)
+                except Exception:
+                    pass
+
+        # ---------------- Grandchild actions ----------------
+        if is_grandchild:
+            parent_iid = parts[0]
+            obj_id = _parse_obj_id_from_iid(parent_iid)
+            obj = _get_cached_or_load(parent_iid, obj_id) if obj_id is not None else None
+            try:
+                grand = self.get_grandchild_delete_action(parts, obj)
+            except Exception:
+                grand = None
+            if grand:
+                label, cb = grand
+                try:
+                    menu.add_command(label=label, command=cb)
+                except Exception:
+                    pass
+
+        # Ensure focus follows selection and show
+        try:
+            self.tree.focus(iid)
+        except Exception:
+            pass
+        if menu.index("end") is not None:
+            try:
+                menu.tk_popup(event.x_root, event.y_root)  # type: ignore[attr-defined]
+            finally:
+                try:
+                    menu.grab_release()
+                except Exception:
+                    pass
+
+    # ---------------- Abstract hooks for subclasses ----------------
+    def get_root_delete_label(self) -> str | None:
+        """Return the label for root delete action, or None to hide it."""
+        raise NotImplementedError
+
+    def on_delete_root_local(self, object_id: int, iid: str) -> None:
+        """Perform a local delete of the root object (update local state and tree)."""
+        raise NotImplementedError
+
+    def get_root_add_component_actions(self, obj: Any) -> list[tuple[str, Any, bool]]:
+        """Return a list of (label, callback, enabled) actions for Add Component submenu."""
+        return []
+
+    def get_component_delete_action(self, comp_name: str, obj: Any, iid: str, parent_iid: str) -> tuple[str, Any] | None:
+        """Return (label, callback) for deleting a component at child-node level, or None."""
+        return None
+
+    def get_component_add_subitem_actions(self, comp_name: str, obj: Any, iid: str, parent_iid: str) -> list[tuple[str, Any]]:
+        """Return additional actions under a component (e.g., add skill row)."""
+        return []
+
+    def get_grandchild_delete_action(self, parts: list[str], obj: Any) -> tuple[str, Any] | None:
+        """Return (label, callback) for deleting a grandchild node, or None to hide."""
+        return None
+
 
     # ------------------------------------------------------------------
     def _build_form_for(self, component_type: str, grandchild_iid: str = None) -> None:
@@ -1523,7 +1708,7 @@ class ItemsTab(BaseObjectEntityTab):
         self.tree.bind("<<TreeviewSelect>>", self._on_list_node_select)
         self.tree.bind("<<TreeviewOpen>>", self._on_list_node_expanded)
         # Right-click (context menu) for delete actions
-        self.tree.bind("<Button-3>", self._on_tree_right_click)
+        self.tree.bind("<Button-3>", self._on_tree_context_menu)
         # Also ensure left-click sets selection before context menu
         self.tree.bind("<Button-1>", lambda e: None, add=True)
 
@@ -1707,443 +1892,297 @@ class ItemsTab(BaseObjectEntityTab):
     # --------------------------------------------------------------
     # Context menu: delete (local) root items and skill subitems
     # --------------------------------------------------------------
-    def _on_tree_right_click(self, event: tk.Event) -> None:
-        """Show a context menu to delete nodes locally (with confirmation).
+    # ---- Context menu hooks (implement base abstract hooks) ----
+    def get_root_delete_label(self) -> str | None:
+        return "Delete item (local)"
 
-        - Root item nodes: removed from the view (local only). Not persisted; a future
-          save won't delete from DB as repository currently doesn't implement object deletion.
-        - Skill subitem nodes (under ObjectSkill): removes that skill row from in-memory
-          object and marks ObjectSkills as dirty so that a subsequent Save will persist
-          the deletion (since skill saves replace all rows).
-        """
-        if not hasattr(self, 'tree'):
-            return
-        # Determine item under cursor and select it
-        iid = self.tree.identify_row(event.y)
-        if not iid:
-            return
+    def on_delete_root_local(self, object_id: int, iid: str) -> None:
+        # Confirm
         try:
-            self.tree.selection_set(iid)
+            text = self.tree.item(iid, 'text') or ''
+        except Exception:
+            text = ''
+        if not messagebox.askyesno(
+            "Delete item",
+            f"Delete {text}?\n\nThis removes it from the view now and will delete it permanently when you press Save.\nAll of its components and skills will also be deleted.",
+            icon=messagebox.WARNING,
+            default=messagebox.NO,
+        ):
+            return
+        # Track local deletion and update tree
+        if not hasattr(self, '_deleted_root_ids'):
+            self._deleted_root_ids = set()
+        self._deleted_root_ids.add(int(object_id))
+        try:
+            self.tree.delete(iid)
+        except Exception:
+            pass
+        # Clear form if we deleted the currently viewed object
+        sel = self.tree.selection()
+        if not sel:
+            self.current_object = None
+            self.current_component_type = None
+            self._show_message("Select an item or component to edit")
+        # Reflect change in the left list immediately
+        self._rebuild_list_tree()
+        # Update undo button state
+        try:
+            self._update_undo_button_state()
         except Exception:
             pass
 
-    # Build a context menu depending on node type
-        menu = tk.Menu(self.tree, tearoff=0)
+    def get_root_add_component_actions(self, obj) -> list[tuple[str, any, bool]]:
+        actions: list[tuple[str, any, bool]] = []
+        if obj is None:
+            return actions
+        existing = set(getattr(getattr(obj, 'components', {}), 'keys', lambda: [])())
+        iid = self.tree.selection()[0] if self.tree.selection() else ''
 
-        # Distinguish node kinds by iid structure
-        parts = iid.split(":")
-        is_root = (":" not in iid)
-        is_child = (":" in iid and len(parts) == 2)
-        is_grandchild = (":" in iid and len(parts) == 3)
-
-        # Helpers ----------------------------------------------------
-        def _parse_obj_id(root_iid: str) -> int | None:
-            try:
-                return int(root_iid.split('-', 1)[1])
-            except Exception:
-                return None
-
-        def _get_cached_or_load(obj_id: int):
-            obj = self._object_cache.get(obj_id)
-            if obj is None:
+        def _add_item_component():
+            comp = self._service.add_item_component(obj)
+            child_iid = f"{iid}:ItemComponent"
+            if not self.tree.exists(child_iid):
                 try:
-                    obj = self._service.get_item(int(obj_id))
-                    if obj is not None:
-                        self._object_cache[obj_id] = obj
+                    self.tree.insert(iid, tk.END, iid=child_iid, text="ItemComponent")
                 except Exception:
-                    obj = None
-            return obj
+                    pass
+            try:
+                self.tree.selection_set(child_iid)
+                self.tree.focus(child_iid)
+                self.current_object = obj
+                self.current_component_type = "ItemComponent"
+                self._build_form_for("ItemComponent")
+            except Exception:
+                pass
+            self._ctx_mark_unsaved_indicator()  # type: ignore[attr-defined]
 
-        def _mark_unsaved_and_refresh_indicator():
+        def _add_render_component():
+            comp = self._service.add_render_component(obj)
+            child_iid = f"{iid}:RenderComponent"
+            if not self.tree.exists(child_iid):
+                try:
+                    self.tree.insert(iid, tk.END, iid=child_iid, text="RenderComponent")
+                except Exception:
+                    pass
+            try:
+                self.tree.selection_set(child_iid)
+                self.tree.focus(child_iid)
+                self.current_object = obj
+                self.current_component_type = "RenderComponent"
+                self._build_form_for("RenderComponent")
+            except Exception:
+                pass
+            self._ctx_mark_unsaved_indicator()  # type: ignore[attr-defined]
+
+        def _add_skill_from_root():
+            new_row = self._service.add_blank_skill(obj)
+            skill_parent_iid = f"{iid}:ObjectSkill"
+            if not self.tree.exists(skill_parent_iid):
+                try:
+                    self.tree.insert(iid, tk.END, iid=skill_parent_iid, text="ObjectSkill")
+                except Exception:
+                    pass
+            skill_iid = f"{skill_parent_iid}:{getattr(new_row, 'skill_id', '')}"
+            if not self.tree.exists(skill_iid):
+                try:
+                    self.tree.insert(skill_parent_iid, tk.END, iid=skill_iid, text=f"Skill {getattr(new_row, 'skill_id', '')}")
+                except Exception:
+                    pass
+            try:
+                self.tree.item(skill_parent_iid, open=True)
+                self.tree.selection_set(skill_iid)
+                self.tree.focus(skill_iid)
+                self.current_object = obj
+                self.current_component_type = "ObjectSkill"
+                self._last_grandchild_iid = str(getattr(new_row, 'skill_id', ''))
+                self._build_form_for("ObjectSkill", self._last_grandchild_iid)
+            except Exception:
+                pass
+            self._ctx_mark_unsaved_indicator()  # type: ignore[attr-defined]
+
+        actions.append(("Item Component", _add_item_component, ("ItemComponent" not in existing)))
+        actions.append(("Render Component", _add_render_component, ("RenderComponent" not in existing)))
+        actions.append(("Skill", _add_skill_from_root, True))
+        return actions
+
+    def get_component_delete_action(self, comp_name: str, obj, iid: str, parent_iid: str):
+        if comp_name not in ("ItemComponent", "RenderComponent", "ObjectSkill"):
+            return None
+        def _delete_component_local():
+            # Parse object id
+            try:
+                obj_id = int(parent_iid.split('-', 1)[1])
+            except Exception:
+                return
+            # Load object (cache or service via base helper)
+            obj_local = obj or self._ctx_get_cached_or_load(parent_iid, obj_id)  # type: ignore[attr-defined]
+            if obj_local is None:
+                messagebox.showerror("Delete failed", "Could not load object to modify component.")
+                return
+            # Confirm
+            if not messagebox.askyesno(
+                "Delete component",
+                f"Delete {comp_name} from object {obj_id}?\n\nThis removes it now and will delete it permanently when you press Save.",
+                icon=messagebox.WARNING,
+                default=messagebox.NO,
+            ):
+                return
+            # Queue deletion specifics and remove from in-memory object
+            if comp_name == 'ItemComponent':
+                comp = obj_local.components.get('ItemComponent')
+                if comp is None:
+                    return
+                comp_id = getattr(comp, 'id', None)
+                deleted_copy = comp
+                obj_local.components.pop('ItemComponent', None)
+                if not hasattr(self, '_deleted_components'):
+                    self._deleted_components = []
+                if comp_id:
+                    self._deleted_components.append({'type': 'ItemComponent', 'component_id': int(comp_id), 'object_id': obj_id, 'component': deleted_copy})
+            elif comp_name == 'RenderComponent':
+                comp = obj_local.components.get('RenderComponent')
+                if comp is None:
+                    return
+                comp_id = getattr(comp, 'id', None)
+                deleted_copy = comp
+                obj_local.components.pop('RenderComponent', None)
+                if not hasattr(self, '_deleted_components'):
+                    self._deleted_components = []
+                if comp_id:
+                    self._deleted_components.append({'type': 'RenderComponent', 'component_id': int(comp_id), 'object_id': obj_id, 'component': deleted_copy})
+            elif comp_name == 'ObjectSkill':
+                comp = obj_local.components.get('ObjectSkill')
+                if comp is None:
+                    return
+                deleted_copy = comp
+                obj_local.components.pop('ObjectSkill', None)
+                if not hasattr(self, '_deleted_components'):
+                    self._deleted_components = []
+                self._deleted_components.append({'type': 'ObjectSkill', 'component_id': None, 'object_id': obj_id, 'component': deleted_copy})
+            # Mark unsaved and update indicator/undo
             self._has_unsaved_changes = True
             self._update_unsaved_indicator()
-
-        # Root: allow local delete (remove from view; will be permanently deleted on Save)
-        if is_root:
-            def _delete_root_local():
-                # Confirm
-                try:
-                    text = self.tree.item(iid, 'text') or ''
-                except Exception:
-                    text = ''
-                if not messagebox.askyesno(
-                    "Delete item",
-                    f"Delete {text}?\n\nThis removes it from the view now and will delete it permanently when you press Save.\nAll of its components and skills will also be deleted.",
-                    icon=messagebox.WARNING,
-                    default=messagebox.NO,
-                ):
-                    return
-                # Parse id
-                try:
-                    obj_id = int(iid.split('-', 1)[1])
-                except Exception:
-                    obj_id = None
-                # Track local deletion and update tree
-                if not hasattr(self, '_deleted_root_ids'):
-                    self._deleted_root_ids = set()
-                if obj_id is not None:
-                    self._deleted_root_ids.add(obj_id)
-                try:
-                    self.tree.delete(iid)
-                except Exception:
-                    pass
-                # Mark unsaved change so user knows to Save to persist deletion
-                _mark_unsaved_and_refresh_indicator()
-                self._update_undo_button_state()
-                # Clear form if we deleted the currently viewed object
-                sel = self.tree.selection()
-                if not sel:
-                    # If nothing selected now, clear right panel
-                    self.current_object = None
-                    self.current_component_type = None
-                    self._show_message("Select an item or component to edit")
-                # Reflect local change in the left list immediately
-                self._rebuild_list_tree()
-            menu.add_command(label="Delete item (local)", command=_delete_root_local)
-
-            # Add Component cascade for root nodes ------------------
-            # Build submenu with eligible components for ITEM objects.
-            add_menu = tk.Menu(menu, tearoff=0)
-            obj_id = _parse_obj_id(iid)
-            obj = _get_cached_or_load(obj_id) if obj_id is not None else None
-            existing = set(getattr(getattr(obj, 'components', {}), 'keys', lambda: [])()) if obj else set()
-
-            # Define available components for items (future-proof for NPC)
-            # Map: menu label -> internal component key
-            item_components: list[tuple[str, str]] = [
-                ("Item Component", "ItemComponent"),
-                ("Render Component", "RenderComponent"),
-                ("Skills", "ObjectSkill"),
-            ]
-
-            def _add_item_component():
-                if obj is None:
-                    return
-                comp = self._service.add_item_component(obj)
-                # Insert child node if not present
-                child_iid = f"{iid}:ItemComponent"
-                if not self.tree.exists(child_iid):
-                    try:
-                        self.tree.insert(iid, tk.END, iid=child_iid, text="ItemComponent")
-                    except Exception:
-                        pass
-                _mark_unsaved_and_refresh_indicator()
-                # Select the new component for immediate editing
-                try:
-                    self.tree.selection_set(child_iid)
-                    self.tree.focus(child_iid)
-                    self.current_object = obj
-                    self.current_component_type = "ItemComponent"
-                    self._build_form_for("ItemComponent")
-                except Exception:
-                    pass
-
-            def _add_render_component():
-                if obj is None:
-                    return
-                comp = self._service.add_render_component(obj)
-                child_iid = f"{iid}:RenderComponent"
-                if not self.tree.exists(child_iid):
-                    try:
-                        self.tree.insert(iid, tk.END, iid=child_iid, text="RenderComponent")
-                    except Exception:
-                        pass
-                _mark_unsaved_and_refresh_indicator()
-                try:
-                    self.tree.selection_set(child_iid)
-                    self.tree.focus(child_iid)
-                    self.current_object = obj
-                    self.current_component_type = "RenderComponent"
-                    self._build_form_for("RenderComponent")
-                except Exception:
-                    pass
-
-            def _add_skill_from_root():
-                if obj is None:
-                    return
-                # Ensure skills component and add one blank row
-                new_row = self._service.add_blank_skill(obj)
-                # Ensure ObjectSkill node exists
-                skill_parent_iid = f"{iid}:ObjectSkill"
-                if not self.tree.exists(skill_parent_iid):
-                    try:
-                        self.tree.insert(iid, tk.END, iid=skill_parent_iid, text="ObjectSkill")
-                    except Exception:
-                        pass
-                # Add the new skill row as a grandchild
-                skill_iid = f"{skill_parent_iid}:{getattr(new_row, 'skill_id', '')}"
-                if not self.tree.exists(skill_iid):
-                    try:
-                        self.tree.insert(skill_parent_iid, tk.END, iid=skill_iid, text=f"Skill {getattr(new_row, 'skill_id', '')}")
-                    except Exception:
-                        pass
-                # Expand skills node and select new skill for editing
-                try:
-                    self.tree.item(skill_parent_iid, open=True)
-                    self.tree.selection_set(skill_iid)
-                    self.tree.focus(skill_iid)
-                    self.current_object = obj
-                    self.current_component_type = "ObjectSkill"
-                    self._last_grandchild_iid = str(getattr(new_row, 'skill_id', ''))
-                    self._build_form_for("ObjectSkill", self._last_grandchild_iid)
-                except Exception:
-                    pass
-                _mark_unsaved_and_refresh_indicator()
-
-            # Populate submenu with enable/disable states (skills allowed always)
-            # Item Component
-            state_ic = (tk.DISABLED if "ItemComponent" in existing else tk.NORMAL)
-            add_menu.add_command(label="Item Component", command=_add_item_component, state=state_ic)
-            # Render Component
-            state_rc = (tk.DISABLED if "RenderComponent" in existing else tk.NORMAL)
-            add_menu.add_command(label="Render Component", command=_add_render_component, state=state_rc)
-            # Skills (always allow – creates component if missing, otherwise adds a new row)
-            add_menu.add_command(label="Skill", command=_add_skill_from_root)
-
-            # Attach cascade only if we're on an item root (future: NPC different options)
-            if obj is not None:
-                menu.add_cascade(label="Add Component", menu=add_menu)
-
-        # Component child: allow removing an entire component (persisted on save)
-        if is_child:
-            parent_iid = parts[0]  # e.g., item-<id>
-            comp_name = parts[1]
-
-            def _delete_component_local():
-                # Parse object id
-                try:
-                    obj_id = int(parent_iid.split('-', 1)[1])
-                except Exception:
-                    return
-
-                # Load object (cache or service)
-                obj = self._object_cache.get(obj_id)
-                if obj is None:
-                    try:
-                        # Access private loader from base class to respect cache/use service
-                        obj = self._BaseObjectEntityTab__load_relevant_object(parent_iid, obj_id)
-                        if obj is not None:
-                            self._object_cache[obj_id] = obj
-                    except Exception:
-                        obj = None
-                if obj is None:
-                    messagebox.showerror("Delete failed", "Could not load object to modify component.")
-                    return
-
-                # Confirm
-                if not messagebox.askyesno(
-                    "Delete component",
-                    f"Delete {comp_name} from object {obj_id}?\n\nThis removes it now and will delete it permanently when you press Save.",
-                    icon=messagebox.WARNING,
-                    default=messagebox.NO,
-                ):
-                    return
-
-                # Queue deletion specifics and remove from in-memory object
-                if comp_name == 'ItemComponent':
-                    comp = obj.components.get('ItemComponent')
-                    if comp is None:
-                        return
-                    comp_id = getattr(comp, 'id', None)
-                    # Keep original for undo
-                    deleted_copy = comp
-                    # Remove component from obj
-                    obj.components.pop('ItemComponent', None)
-                    # Track deletion for persistence
-                    if not hasattr(self, '_deleted_components'):
-                        self._deleted_components = []
-                    if comp_id:
-                        self._deleted_components.append({'type': 'ItemComponent', 'component_id': int(comp_id), 'object_id': obj_id, 'component': deleted_copy})
-                elif comp_name == 'RenderComponent':
-                    comp = obj.components.get('RenderComponent')
-                    if comp is None:
-                        return
-                    comp_id = getattr(comp, 'id', None)
-                    deleted_copy = comp
-                    obj.components.pop('RenderComponent', None)
-                    if not hasattr(self, '_deleted_components'):
-                        self._deleted_components = []
-                    if comp_id:
-                        self._deleted_components.append({'type': 'RenderComponent', 'component_id': int(comp_id), 'object_id': obj_id, 'component': deleted_copy})
-                elif comp_name == 'ObjectSkill':
-                    # Remove the entire skill component (all rows); persistence later
-                    if obj.components.get('ObjectSkill') is None:
-                        return
-                    deleted_copy = obj.components.get('ObjectSkill')
-                    obj.components.pop('ObjectSkill', None)
-                    if not hasattr(self, '_deleted_components'):
-                        self._deleted_components = []
-                    self._deleted_components.append({'type': 'ObjectSkill', 'component_id': None, 'object_id': obj_id, 'component': deleted_copy})
-                else:
-                    # Unknown component type – do nothing
-                    return
-
-                # Mark unsaved and update indicator
-                self._has_unsaved_changes = True
-                self._update_unsaved_indicator()
-                self._update_undo_button_state()
-
-                # Remove the node (and any children) from the tree
-                try:
-                    # If this is ObjectSkill, delete grandchildren as well
-                    if comp_name == 'ObjectSkill':
-                        for child in self.tree.get_children(iid):
-                            try:
-                                self.tree.delete(child)
-                            except Exception:
-                                pass
-                    self.tree.delete(iid)
-                except Exception:
-                    pass
-
-                # If we were viewing this component, clear or switch the form
-                sel = self.tree.selection()
-                if not sel:
-                    self.current_component_type = 'object'
-                    self.current_object = obj
-                    self._build_form_for('object')
-
-            # Only show delete for known component nodes
-            if parts[1] in ('ItemComponent', 'RenderComponent', 'ObjectSkill'):
-                menu.add_command(label="Delete component (local)", command=_delete_component_local)
-
-            # If right-clicking on ObjectSkill component node, allow adding a blank skill
-            if comp_name == 'ObjectSkill':
-                def _add_skill_under_component():
-                    obj_id = _parse_obj_id(parent_iid)
-                    if obj_id is None:
-                        return
-                    obj = _get_cached_or_load(obj_id)
-                    if obj is None:
-                        return
-                    new_row = self._service.add_blank_skill(obj)
-                    # Insert the new grandchild node
-                    skill_parent_iid = iid
-                    skill_iid = f"{skill_parent_iid}:{getattr(new_row, 'skill_id', '')}"
-                    if not self.tree.exists(skill_iid):
-                        try:
-                            self.tree.insert(skill_parent_iid, tk.END, iid=skill_iid, text=f"Skill {getattr(new_row, 'skill_id', '')}")
-                        except Exception:
-                            pass
-                    try:
-                        self.tree.item(skill_parent_iid, open=True)
-                        self.tree.selection_set(skill_iid)
-                        self.tree.focus(skill_iid)
-                        self.current_object = obj
-                        self.current_component_type = 'ObjectSkill'
-                        self._last_grandchild_iid = str(getattr(new_row, 'skill_id', ''))
-                        self._build_form_for('ObjectSkill', self._last_grandchild_iid)
-                    except Exception:
-                        pass
-                    _mark_unsaved_and_refresh_indicator()
-                menu.add_command(label="Add skill", command=_add_skill_under_component)
-
-        # Skill grandchild: allow removing a single skill row (persisted on save)
-        if is_grandchild:
-            def _delete_skill_row():
-                parent_iid = parts[0]  # item-<id>
-                comp_name = parts[1]   # ObjectSkill
-                grandchild_id = parts[2]  # skill_id
-                # Only handle ObjectSkill children
-                if comp_name != 'ObjectSkill':
-                    return
-                # Parse ids
-                try:
-                    obj_id = int(parent_iid.split('-', 1)[1])
-                    skill_id = int(grandchild_id)
-                except Exception:
-                    return
-                # Confirm
-                if not messagebox.askyesno(
-                    "Delete skill",
-                    f"Delete Skill {skill_id} from object {obj_id}?\n\nThis removes it now and will delete it permanently when you press Save.",
-                    icon=messagebox.WARNING,
-                    default=messagebox.NO,
-                ):
-                    return
-                # Load object (prefer cache, otherwise service)
-                obj = self._object_cache.get(obj_id)
-                if obj is None:
-                    try:
-                        # Use base helper if available, else fallback to service
-                        try:
-                            obj = self._BaseObjectEntityTab__load_relevant_object(parent_iid, obj_id)
-                        except Exception:
-                            obj = self._service.get_item(obj_id)
-                        if obj is not None:
-                            self._object_cache[obj_id] = obj
-                    except Exception:
-                        obj = None
-                if obj is None:
-                    messagebox.showerror("Delete failed", "Could not load object to modify skills.")
-                    return
-                skill_comp = obj.components.get('ObjectSkill')
-                if not skill_comp or not hasattr(skill_comp, 'skills'):
-                    messagebox.showerror("Delete failed", "Object has no skills component.")
-                    return
-                # Remove matching skill row and store for undo
-                removed_rows = [row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id]
-                original_len = len(skill_comp.skills)
-                skill_comp.skills = [row for row in skill_comp.skills if getattr(row, 'skill_id', None) != skill_id]
-                if len(skill_comp.skills) == original_len:
-                    # No change
-                    return
-                # Track deleted skill row(s) for undo
-                if removed_rows:
-                    if not hasattr(self, '_deleted_skill_rows'):
-                        self._deleted_skill_rows = []
-                    for r in removed_rows:
-                        self._deleted_skill_rows.append({'object_id': obj_id, 'row': r})
-                # Mark dirty and update UI
-                try:
-                    skill_comp.dirty = True
-                except Exception:
-                    pass
-                self._has_unsaved_changes = True
-                self._update_unsaved_indicator()
-                self._update_undo_button_state()
-                # Remove the node from the tree
-                try:
-                    self.tree.delete(iid)
-                except Exception:
-                    pass
-                # If the deleted node was currently open in the form, clear or switch to the ObjectSkill component
-                sel = self.tree.selection()
-                if not sel:
-                    # Reselect parent skill component node if present
-                    parent_skill_iid = f"{parent_iid}:ObjectSkill"
-                    if self.tree.exists(parent_skill_iid):
-                        try:
-                            self.tree.selection_set(parent_skill_iid)
-                            self.tree.focus(parent_skill_iid)
-                            self.tree.see(parent_skill_iid)
-                            # If the form was showing this skill row, rebuild for the component
-                            self.current_object = obj
-                            self.current_component_type = 'ObjectSkill'
-                            self._build_form_for('ObjectSkill', None)
-                        except Exception:
-                            pass
-                # Ensure parent remains expanded
-                try:
-                    self.tree.item(f"{parent_iid}:ObjectSkill", open=True)
-                except Exception:
-                    pass
-            menu.add_command(label="Delete skill", command=_delete_skill_row)
-
-        # Ensure focus follows selection (helps with keyboard and visual focus)
-        try:
-            self.tree.focus(iid)
-        except Exception:
-            pass
-
-        if menu.index("end") is not None:
+            self._update_undo_button_state()
+            # Remove node (and grandchildren for ObjectSkill)
             try:
-                menu.tk_popup(event.x_root, event.y_root)
-            finally:
+                if comp_name == 'ObjectSkill':
+                    for child in self.tree.get_children(iid):
+                        try:
+                            self.tree.delete(child)
+                        except Exception:
+                            pass
+                self.tree.delete(iid)
+            except Exception:
+                pass
+            # If we were viewing this component, clear/switch the form
+            sel = self.tree.selection()
+            if not sel:
+                self.current_component_type = 'object'
+                self.current_object = obj_local
+                self._build_form_for('object')
+        return ("Delete component (local)", _delete_component_local)
+
+    def get_component_add_subitem_actions(self, comp_name: str, obj, iid: str, parent_iid: str):
+        actions: list[tuple[str, any]] = []
+        if comp_name != 'ObjectSkill':
+            return actions
+        def _add_skill_under_component():
+            # prefer cached obj, else via base helper
+            try:
+                obj_id = int(parent_iid.split('-', 1)[1])
+            except Exception:
+                return
+            target = obj or self._ctx_get_cached_or_load(parent_iid, obj_id)  # type: ignore[attr-defined]
+            if target is None:
+                return
+            new_row = self._service.add_blank_skill(target)
+            skill_parent_iid = iid
+            skill_iid = f"{skill_parent_iid}:{getattr(new_row, 'skill_id', '')}"
+            if not self.tree.exists(skill_iid):
                 try:
-                    menu.grab_release()
+                    self.tree.insert(skill_parent_iid, tk.END, iid=skill_iid, text=f"Skill {getattr(new_row, 'skill_id', '')}")
                 except Exception:
                     pass
+            try:
+                self.tree.item(skill_parent_iid, open=True)
+                self.tree.selection_set(skill_iid)
+                self.tree.focus(skill_iid)
+                self.current_object = target
+                self.current_component_type = 'ObjectSkill'
+                self._last_grandchild_iid = str(getattr(new_row, 'skill_id', ''))
+                self._build_form_for('ObjectSkill', self._last_grandchild_iid)
+            except Exception:
+                pass
+            self._ctx_mark_unsaved_indicator()  # type: ignore[attr-defined]
+        actions.append(("Add skill", _add_skill_under_component))
+        return actions
+
+    def get_grandchild_delete_action(self, parts: list[str], obj):
+        # Only handle ObjectSkill grandchildren
+        if len(parts) != 3 or parts[1] != 'ObjectSkill':
+            return None
+        iid = self.tree.selection()[0] if self.tree.selection() else ''
+        def _delete_skill_row():
+            parent_iid = parts[0]
+            try:
+                obj_id = int(parent_iid.split('-', 1)[1])
+                skill_id = int(parts[2])
+            except Exception:
+                return
+            if not messagebox.askyesno(
+                "Delete skill",
+                f"Delete Skill {skill_id} from object {obj_id}?\n\nThis removes it now and will delete it permanently when you press Save.",
+                icon=messagebox.WARNING,
+                default=messagebox.NO,
+            ):
+                return
+            target = obj or self._ctx_get_cached_or_load(parent_iid, obj_id)  # type: ignore[attr-defined]
+            if target is None:
+                messagebox.showerror("Delete failed", "Could not load object to modify skills.")
+                return
+            skill_comp = target.components.get('ObjectSkill')
+            if not skill_comp or not hasattr(skill_comp, 'skills'):
+                messagebox.showerror("Delete failed", "Object has no skills component.")
+                return
+            removed_rows = [row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id]
+            original_len = len(skill_comp.skills)
+            skill_comp.skills = [row for row in skill_comp.skills if getattr(row, 'skill_id', None) != skill_id]
+            if len(skill_comp.skills) == original_len:
+                return
+            if removed_rows:
+                if not hasattr(self, '_deleted_skill_rows'):
+                    self._deleted_skill_rows = []
+                for r in removed_rows:
+                    self._deleted_skill_rows.append({'object_id': obj_id, 'row': r})
+            try:
+                skill_comp.dirty = True
+            except Exception:
+                pass
+            self._has_unsaved_changes = True
+            self._update_unsaved_indicator()
+            self._update_undo_button_state()
+            try:
+                self.tree.delete(iid)
+            except Exception:
+                pass
+            sel = self.tree.selection()
+            if not sel:
+                parent_skill_iid = f"{parent_iid}:ObjectSkill"
+                if self.tree.exists(parent_skill_iid):
+                    try:
+                        self.tree.selection_set(parent_skill_iid)
+                        self.tree.focus(parent_skill_iid)
+                        self.tree.see(parent_skill_iid)
+                        self.current_object = target
+                        self.current_component_type = 'ObjectSkill'
+                        self._build_form_for('ObjectSkill', None)
+                    except Exception:
+                        pass
+            try:
+                self.tree.item(f"{parent_iid}:ObjectSkill", open=True)
+            except Exception:
+                pass
+        return ("Delete skill", _delete_skill_row)
 
     def _undo_local_deletes(self) -> None:
         """Undo all local (not yet persisted) deletions: roots, components, and individual skill rows.
