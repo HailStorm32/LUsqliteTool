@@ -401,8 +401,9 @@ class baseRepository:
         ).fetchall()
 
         if not rows:
-            raise NotFoundError(f"ObjectSkills of objectTemplate: {param} not found for object {object_id}",
-                                table="ObjectSkills", column="objectTemplate", value=param)
+            print(f"WARNING: Object {object_id} has skill entry in ComponentsRegistry but no rows found in ObjectSkills table.")
+            # raise NotFoundError(f"ObjectSkills of objectTemplate: {param} not found for object {object_id}",
+            #                     table="ObjectSkills", column="objectTemplate", value=param)
 
         skill_list = []
 
