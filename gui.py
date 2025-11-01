@@ -1173,6 +1173,33 @@ class BaseObjectEntityTab(ttk.Frame):
         self._on_save(persist=False)
         self._update_unsaved_indicator()
 
+    def _on_save_all(self) -> None:
+        """Save current form AND all other dirty cached objects/components.
+
+        This keeps the existing behavior of _on_save(persist=True) for the
+        currently open object (including UI label updates), then persists any
+        remaining dirty objects in the cache and queued deletions. Ensures the
+        unsaved indicator is cleared if everything is saved successfully.
+        """
+        # First, save the currently focused form (handles UI updates like renames)
+        try:
+            self._on_save(persist=True)
+        except Exception:
+            # _on_save already surfaces its own errors to the UI; continue to try saving the rest
+            pass
+
+        # Then, persist any other dirty cached objects and queued deletions
+        try:
+            self.save_all_dirty()
+        except Exception as exc:
+            try:
+                messagebox.showerror("Save failed", f"Could not save all changes:\n{exc}")
+            except Exception:
+                pass
+        finally:
+            # Ensure indicator reflects final state
+            self._update_unsaved_indicator()
+
     def _mark_unsaved(self) -> None:
         """Set the unsaved flag and update UI indicator."""
         self._has_unsaved_changes = True
@@ -1735,7 +1762,7 @@ class ItemsTab(BaseObjectEntityTab):
         self.save_button = ttk.Button(
             self.detail,
             text="Save",
-            command=lambda: self._on_save(persist=True),
+            command=self._on_save_all,
             state=tk.DISABLED,
         )
         self.save_button.pack(padx=10, pady=10, anchor=tk.SE)
