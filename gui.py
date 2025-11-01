@@ -9,7 +9,7 @@ from pathlib import Path
 from Service.services import ItemService, NPCService
 from metadata import component_field_metadata
 from dataclasses import fields, is_dataclass
-from typing import Any
+from typing import Any, Callable
 from Domain.domains import ColorType  # Color enum used for item color field and swatch
 
 # Import Item for type hinting
@@ -387,9 +387,20 @@ class BaseObjectEntityTab(ttk.Frame):
                 var = tk.BooleanVar(value=value)
                 cb = ttk.Checkbutton(inner, variable=var)
                 if readonly:
+                    # Keep the checkbox disabled (not editable), but still allow copying its value
+                    # via a right-click context menu bound below.
                     cb.state(["disabled"])  # ttk style disable
                 cb.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                 widget_for_tooltip = cb
+                # Right-click-to-copy on readonly/any boolean (copies "True"/"False")
+                try:
+                    self._attach_copy_context_menu(
+                        cb,
+                        lambda v=var: "True" if bool(v.get()) else "False",
+                        field_name=f.name,
+                    )
+                except Exception:
+                    pass
             elif (
                 isinstance(value, Enum)
                 or (isinstance(py_type, type) and issubclass(py_type, Enum))
@@ -418,16 +429,34 @@ class BaseObjectEntityTab(ttk.Frame):
                     display = ''
 
                 var = tk.StringVar(value=display)
-                combo = ttk.Combobox(inner, state='readonly', values=options, textvariable=var, width=28)
+
                 if readonly:
-                    combo.configure(state='disabled')
-                combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
-                widget_for_tooltip = combo
+                    # Read-only enum fields: show a read-only Entry with the display text so
+                    # users can select/copy, but not change the value. This avoids the ability
+                    # to alter selection that a Combobox in 'readonly' state would otherwise allow.
+                    entry_ro = ttk.Entry(inner, textvariable=var, width=30, state='readonly')
+                    entry_ro.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                    widget_for_tooltip = entry_ro
+                    # Allow convenient copying via context menu as well.
+                    try:
+                        self._attach_copy_context_menu(
+                            entry_ro,
+                            lambda v=var: str(v.get() or ""),
+                            field_name=f.name,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    combo = ttk.Combobox(inner, state='readonly', values=options, textvariable=var, width=28)
+                    combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                    widget_for_tooltip = combo
 
                 # Prevent accidental value changes by mouse wheel when hovering the dropdown.
                 # Instead, route the wheel to scroll the form's canvas for a better UX.
                 try:
-                    self._attach_combobox_wheel_passthrough(combo, canvas)
+                    # Only attach for actual Combobox widgets (not the read-only Entry case)
+                    if not readonly:
+                        self._attach_combobox_wheel_passthrough(combo, canvas)
                 except Exception:
                     pass
 
@@ -435,14 +464,40 @@ class BaseObjectEntityTab(ttk.Frame):
                 if enum_type is ColorType:
                     # Build swatch UI elements and wire them to follow dropdown selection
                     swatch, hex_label = self._create_color_swatch(inner, row)
-                    # Initialize and keep in sync with dropdown selection/events
-                    self._update_color_swatch(combo, var, enum_type, swatch, hex_label)
+                    if readonly:
+                        # In read-only mode, no dropdown — just reflect the current value into the swatch once.
+                        try:
+                            # Simulate update using the current text in var
+                            sel_text = var.get() or ""
+                            # Normalize '(id)NAME' labels to NAME
+                            if sel_text.startswith('(') and ')' in sel_text:
+                                sel_text = sel_text.split(')', 1)[1]
+                            member = self._coerce_enum_from_selection(enum_type, sel_text)
+                            color_hex = getattr(member, 'hex', '#FFFFFF') if member else '#FFFFFF'
+                            swatch.configure(background=color_hex)
+                            hex_label.configure(text=color_hex)
+                        except Exception:
+                            pass
+                    else:
+                        # Initialize and keep in sync with dropdown selection/events
+                        self._update_color_swatch(combo, var, enum_type, swatch, hex_label)
+                        try:
+                            var.trace_add('write', lambda *_: self._update_color_swatch(combo, var, enum_type, swatch, hex_label))
+                        except Exception:
+                            pass
+                        try:
+                            combo.bind('<<ComboboxSelected>>', lambda _e: self._update_color_swatch(combo, var, enum_type, swatch, hex_label))
+                        except Exception:
+                            pass
+
+                # Allow copy via context menu for editable enum Combobox too (copies current label)
+                if not readonly:
                     try:
-                        var.trace_add('write', lambda *_: self._update_color_swatch(combo, var, enum_type, swatch, hex_label))
-                    except Exception:
-                        pass
-                    try:
-                        combo.bind('<<ComboboxSelected>>', lambda _e: self._update_color_swatch(combo, var, enum_type, swatch, hex_label))
+                        self._attach_copy_context_menu(
+                            widget_for_tooltip,
+                            lambda v=var: str(v.get() or ""),
+                            field_name=f.name,
+                        )
                     except Exception:
                         pass
             else:
@@ -460,9 +515,23 @@ class BaseObjectEntityTab(ttk.Frame):
                 var = tk.StringVar(value=display)
                 entry = ttk.Entry(inner, textvariable=var, width=30)
                 if readonly:
-                    entry.configure(state='disabled')
+                    # Use 'readonly' (not 'disabled') so users can select/copy text
+                    try:
+                        entry.configure(state='readonly')
+                    except Exception:
+                        # Fallback to disabled if theme/widget doesn't support 'readonly'
+                        entry.configure(state='disabled')
                 entry.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                 widget_for_tooltip = entry
+                # Allow copying from text entries (readonly or editable) via context menu
+                try:
+                    self._attach_copy_context_menu(
+                        entry,
+                        lambda v=var: str(v.get() or ""),
+                        field_name=f.name,
+                    )
+                except Exception:
+                    pass
 
             # Keep track of the field so the Save handler can apply changes later.
             # We save the declared dataclass field type (f.type) to guide basic coercion.
@@ -677,6 +746,74 @@ class BaseObjectEntityTab(ttk.Frame):
 
         widget.bind("<Enter>", show_tip)
         widget.bind("<Leave>", hide_tip)
+
+    # ------------------------------------------------------------------
+    # Copy helpers (right-click to copy field values, including read-only)
+    # ------------------------------------------------------------------
+    def _attach_copy_context_menu(self, widget: tk.Widget, text_getter: Callable[[], str], field_name: str = "") -> None:
+        """Attach a simple right-click context menu to copy the widget's value.
+
+        This keeps read-only fields useful while preventing edits. Works across
+        Entry, Combobox (editable), and Checkbutton (copies "True"/"False").
+        """
+        if widget is None:
+            return
+
+        def _do_copy() -> None:
+            text = ""
+            try:
+                text = str(text_getter() or "")
+            except Exception:
+                # If we cannot read the value, copy nothing and log
+                log.exception("Failed to read value for copy on field '%s'", field_name)
+                text = ""
+            self._copy_value_to_clipboard(text, field_name)
+
+        def _show_menu(event: tk.Event) -> str:
+            try:
+                menu = tk.Menu(widget, tearoff=0)  # type: ignore[arg-type]
+                menu.add_command(label="Copy value", command=_do_copy)
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)  # type: ignore[attr-defined]
+                finally:
+                    try:
+                        menu.grab_release()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Prevent default right-click behaviors (e.g., focus steal)
+            return "break"
+
+        try:
+            widget.bind("<Button-3>", _show_menu, add=True)
+        except Exception:
+            pass
+
+    def _copy_value_to_clipboard(self, text: str, field_name: str | None = None) -> None:
+        """Copy text to the OS clipboard and log the action (with object id when available)."""
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except Exception:
+            # Fallback via toplevel
+            try:
+                top = self.winfo_toplevel()
+                top.clipboard_clear()
+                top.clipboard_append(text)
+            except Exception:
+                log.exception("Clipboard operation failed for field '%s'", field_name or "?")
+                return
+        # Log the copy action with object id context when available
+        try:
+            oid = getattr(getattr(self, 'current_object', None), 'object_id', None)
+            if oid is not None:
+                log.info("Copied value from field '%s' (object_id=%s)", field_name or "?", oid)
+            else:
+                log.info("Copied value from field '%s'", field_name or "?")
+        except Exception:
+            # Don't let logging issues affect UX
+            pass
 
     # ------------------------------------------------------------------
     # Enum resolution helpers (avoid exceptions for control flow)

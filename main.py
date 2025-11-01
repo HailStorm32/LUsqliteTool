@@ -86,6 +86,6 @@ color1 mapping
     https://explorer.lu-dev.net/misc/brick-colors
 
 
-    Add the following functionality. Keep readability and maintainability in mind and be sure to leave comments. Also keep in mind to try to commonize when possible to reduce duplicate code when NPC objects are added
+    Add the following functionality. Keep readability and maintainability in mind and be sure to leave comments. Also keep in mind to try to commonize when possible to reduce duplicate code when NPC objects are added. Make use of logging for error handling and important events. Log object ID if available.
 """
 
