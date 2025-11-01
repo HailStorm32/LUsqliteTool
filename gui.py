@@ -337,6 +337,11 @@ class BaseObjectEntityTab(ttk.Frame):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # Enable intuitive mouse-wheel scrolling when hovering over the form area
+        # (works on Windows, macOS, and Linux). This is centralized so future
+        # NPC tabs/forms can reuse the same behavior.
+        self._setup_mousewheel_scrolling(canvas, inner)
+
         # Build form fields (labels + entry/checkbutton)
         # Iterate over dataclass fields and create a row for each
         # `row` is used for grid placement so fields appear vertically stacked.
@@ -469,6 +474,102 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Enable the Save button once there is an editable form
         self.save_button.configure(state=tk.NORMAL)
+
+    # ------------------------------------------------------------------
+    # Tooltip helpers
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Scrollable form mousewheel helpers (shared by all object tabs)
+    # ------------------------------------------------------------------
+    def _setup_mousewheel_scrolling(self, canvas: tk.Canvas, inner: tk.Widget) -> None:
+        """Make the scrollable form area respond to mouse-wheel when hovered.
+
+        Implementation details:
+        - We bind/unbind global wheel events on <Enter>/<Leave> because Tk on
+          Windows typically sends <MouseWheel> to the focused widget, not the
+          one under the pointer. This technique enables "hover-to-scroll".
+        - Linux uses <Button-4>/<Button-5> for wheel up/down; we support both.
+        - Binding is limited to the lifetime of the hover to avoid side effects
+          elsewhere in the UI.
+        """
+        # Bind on both the canvas and the inner frame so moving across their
+        # boundary keeps scrolling working.
+
+        def _bind_all(_event=None):
+            # Route all wheel events to this canvas while hovered
+            try:
+                canvas.bind_all("<MouseWheel>", lambda e: self._on_mousewheel_scroll(e, canvas), add=True)
+            except Exception:
+                pass
+            # Linux (X11) wheel events
+            try:
+                canvas.bind_all("<Button-4>", lambda e: self._on_mousewheel_scroll(e, canvas), add=True)
+                canvas.bind_all("<Button-5>", lambda e: self._on_mousewheel_scroll(e, canvas), add=True)
+            except Exception:
+                pass
+
+        def _unbind_all(_event=None):
+            # Remove our global bindings; other bindings (if any) remain intact
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            try:
+                canvas.unbind_all("<Button-4>")
+            except Exception:
+                pass
+            try:
+                canvas.unbind_all("<Button-5>")
+            except Exception:
+                pass
+
+        for w in (canvas, inner):
+            try:
+                w.bind("<Enter>", _bind_all)
+                w.bind("<Leave>", _unbind_all)
+            except Exception:
+                pass
+
+    def _on_mousewheel_scroll(self, event: tk.Event, canvas: tk.Canvas) -> None:
+        """Scroll the canvas from a wheel event (cross-platform).
+
+        - Windows/macOS deliver <MouseWheel> with event.delta multiples of 120.
+        - Linux (X11) delivers <Button-4> (up) and <Button-5> (down).
+        We normalize both to small unit scrolls for a predictable feel.
+        """
+        # Determine direction/amount
+        move_units = 0
+        try:
+            # X11: buttons 4/5
+            num = getattr(event, 'num', None)
+            if num == 4:
+                move_units = -3  # up
+            elif num == 5:
+                move_units = 3   # down
+            else:
+                # Windows/macOS: delta positive is up on Windows (typically 120 per notch)
+                delta = getattr(event, 'delta', 0)
+                if isinstance(delta, (int, float)) and delta != 0:
+                    # Scale to roughly 3 units per notch; invert for natural scroll
+                    move_units = -int(delta / 40)  # 120 -> -3, -120 -> 3
+        except Exception:
+            move_units = 0
+
+        if move_units == 0:
+            # Fallback to a single unit in the appropriate direction, if known
+            try:
+                if getattr(event, 'delta', 0) > 0:
+                    move_units = -1
+                elif getattr(event, 'delta', 0) < 0:
+                    move_units = 1
+            except Exception:
+                move_units = 0
+
+        if move_units:
+            try:
+                canvas.yview_scroll(move_units, 'units')
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Tooltip helpers
