@@ -421,6 +421,13 @@ class BaseObjectEntityTab(ttk.Frame):
                 combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                 widget_for_tooltip = combo
 
+                # Prevent accidental value changes by mouse wheel when hovering the dropdown.
+                # Instead, route the wheel to scroll the form's canvas for a better UX.
+                try:
+                    self._attach_combobox_wheel_passthrough(combo, canvas)
+                except Exception:
+                    pass
+
                 # If this is the ColorType enum, show a live color swatch and hex value next to the dropdown
                 if enum_type is ColorType:
                     # Build swatch UI elements and wire them to follow dropdown selection
@@ -530,6 +537,38 @@ class BaseObjectEntityTab(ttk.Frame):
             except Exception:
                 pass
 
+    def _attach_combobox_wheel_passthrough(self, combo: ttk.Combobox, canvas: tk.Canvas | None) -> None:
+        """On hover over a Combobox, prevent wheel from changing selection.
+
+        Wheel events will instead scroll the provided canvas (if any). This avoids
+        accidental changes to enum fields when the user is scrolling the form.
+        The dropdown popup list (when open) is a separate window and will still
+        scroll normally, which is desirable when a user explicitly opens it.
+        """
+        if canvas is None:
+            return
+
+        def _wheel(e):
+            # If form isn't scrollable, still block to avoid changing selection
+            try:
+                if not self._canvas_is_scrollable(canvas):
+                    return "break"
+            except Exception:
+                return "break"
+            # Scroll the form and block default Combobox behavior
+            self._on_mousewheel_scroll(e, canvas)
+            return "break"
+
+        try:
+            combo.bind("<MouseWheel>", _wheel, add=True)  # Windows/macOS
+        except Exception:
+            pass
+        try:
+            combo.bind("<Button-4>", _wheel, add=True)   # Linux up
+            combo.bind("<Button-5>", _wheel, add=True)   # Linux down
+        except Exception:
+            pass
+
     def _on_mousewheel_scroll(self, event: tk.Event, canvas: tk.Canvas) -> None:
         """Scroll the canvas from a wheel event (cross-platform).
 
@@ -537,6 +576,12 @@ class BaseObjectEntityTab(ttk.Frame):
         - Linux (X11) delivers <Button-4> (up) and <Button-5> (down).
         We normalize both to small unit scrolls for a predictable feel.
         """
+        # If the canvas isn't scrollable (everything fits), do nothing
+        try:
+            if not self._canvas_is_scrollable(canvas):
+                return
+        except Exception:
+            return
         # Determine direction/amount
         move_units = 0
         try:
@@ -566,10 +611,32 @@ class BaseObjectEntityTab(ttk.Frame):
                 move_units = 0
 
         if move_units:
+            # Avoid overscrolling when already at extremes
+            try:
+                first, last = canvas.yview()
+                if move_units < 0 and first <= 0.0:
+                    return
+                if move_units > 0 and last >= 1.0:
+                    return
+            except Exception:
+                pass
             try:
                 canvas.yview_scroll(move_units, 'units')
             except Exception:
                 pass
+
+    def _canvas_is_scrollable(self, canvas: tk.Canvas) -> bool:
+        """Return True if the canvas content exceeds its viewport vertically.
+
+        Uses yview fractions to determine if the full content (0.0..1.0) is visible.
+        """
+        try:
+            canvas.update_idletasks()
+            first, last = canvas.yview()
+            # Not scrollable when the full range is visible
+            return not (first <= 0.0 and last >= 1.0)
+        except Exception:
+            return False
 
     # ------------------------------------------------------------------
     # Tooltip helpers

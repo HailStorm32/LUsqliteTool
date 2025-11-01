@@ -35,7 +35,6 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Scroll fields area will scroll page
 - Implement actual logging instead of print statements
 - NPC functionality
    - domains
