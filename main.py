@@ -20,6 +20,10 @@ LOG_FILE_ONLY: bool = False
 
 # Database path: set to a string path to skip the file dialog; set to None to prompt
 DB_PATH: str | None = None
+
+# Application version shown in the window title. Update as you release.
+APP_VERSION: str = "0.1.0"
+
 def main() -> None:
     """Entry point: configure logging, choose database, and launch Tkinter GUI."""
     # Initialize logging before anything else using in-file constants
@@ -50,7 +54,8 @@ def main() -> None:
         return
 
     log.info("Starting application with database: %s", db_file)
-    app = Application(db_file)
+    # Pass the version to the GUI so it can be displayed in the window title
+    app = Application(db_file, version=APP_VERSION)
     try:
         app.run()
     except Exception:

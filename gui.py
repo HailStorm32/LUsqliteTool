@@ -2486,12 +2486,29 @@ class ItemsTab(BaseObjectEntityTab):
 class Application:
     """Main Tkinter application window."""
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, version: str | None = None):
+        """Create the main window.
+
+        version: optional version string to display in the window title, e.g. "0.1.0".
+        Keeping this argument optional preserves backward compatibility and makes it
+        easy for packaging/CI to stamp the version in the entry point without
+        touching this module.
+        """
         self.db_path = Path(db_path)
+        self.version = version
         self.root = tk.Tk()
-        self.root.title("LU SQLite Tool")
+        # Compose a friendly title that includes the version when provided
+        base_title = "LU SQLite Tool"
+        try:
+            if isinstance(self.version, str) and self.version.strip():
+                self.root.title(f"{base_title} v{self.version.strip()}")
+            else:
+                self.root.title(base_title)
+        except Exception:
+            # Last-resort fallback to a static title
+            self.root.title(base_title)
         # Set a larger initial window size so more fields are visible without resizing.
-        # Width x Height; adjust if you prefer different default dimensions.
+        # Width x Height;
         self.root.geometry("1280x900")
 
         # Route Tkinter callback exceptions to logger (helps catch UI errors)
