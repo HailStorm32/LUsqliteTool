@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox
 from enum import Enum, IntEnum, StrEnum
@@ -13,6 +14,8 @@ from Domain.domains import ColorType  # Color enum used for item color field and
 
 # Import Item for type hinting
 from Service.services import Item
+
+log = logging.getLogger(__name__)
 
 class BaseObjectEntityTab(ttk.Frame):
     """Base class for a tab object entries in the notebook."""
@@ -988,7 +991,7 @@ class BaseObjectEntityTab(ttk.Frame):
         # Fetch object details from the respective service
         obj = self.__load_relevant_object(parent_iid, object_id)
         if obj is None:
-            print(f"ERROR: could not load object {object_id} for expansion")
+            log.error("Could not load object %s for expansion", object_id)
             return
 
         component_list = obj.components
@@ -1574,7 +1577,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Validate sort_by
         if sort_by not in {"auto", "id", "name"}:
-            print(f"WARNING: invalid sort_by '{sort_by}' – defaulting to 'auto'")
+            log.warning("Invalid sort_by '%s' – defaulting to 'auto'", sort_by)
             sort_by = "auto"
 
         def _key(obj):
@@ -1700,8 +1703,8 @@ class BaseObjectEntityTab(ttk.Frame):
         if not self._list_data:
             try:
                 self._list_data = self._load_list_data() or []
-            except Exception as exc:
-                print(f"ERROR loading list data: {exc}")
+            except Exception:
+                log.exception("Error loading list data")
                 self._list_data = []
 
         # Try to preserve current selection by parsing the id from the label text
@@ -1793,6 +1796,7 @@ class BaseObjectEntityTab(ttk.Frame):
                 # Collision (duplicate iid). Use alternate iid variant.
                 parent_iid = self._make_root_iid_alt(object_id)
                 self.tree.insert("", tk.END, iid=parent_iid, text=text, open=False)
+                log.warning("Duplicate iid for object id %s; using alternate iid %s", object_id, parent_iid)
             # Add dummy child to make expandable
             self.tree.insert(parent_iid, tk.END, iid=f"{parent_iid}:dummy", text="(loading...)")
 
@@ -2490,6 +2494,13 @@ class Application:
         # Width x Height; adjust if you prefer different default dimensions.
         self.root.geometry("1280x900")
 
+        # Route Tkinter callback exceptions to logger (helps catch UI errors)
+        try:
+            # Called when exceptions escape widget callbacks
+            self.root.report_callback_exception = self._on_tk_callback_exception  # type: ignore[attr-defined]
+        except Exception:
+            log.debug("Failed to attach Tkinter report_callback_exception", exc_info=True)
+
         # Services ------------------------------------------------------
         self.item_service = ItemService(self.db_path)
         self.npc_service = NPCService(self.db_path)  # placeholder for future use
@@ -2544,6 +2555,7 @@ class Application:
                     for tab in tabs_with_changes:
                         tab.save_all_dirty()
                 except Exception as exc:
+                    log.exception("Save-all on close failed")
                     messagebox.showerror("Save failed", f"Could not save all changes:\n{exc}")
                     return
                 self.root.destroy()
@@ -2552,8 +2564,18 @@ class Application:
             self.root.destroy()
         except Exception:
             # If anything unexpected, fall back to normal close
+            log.exception("Unexpected error during close handler")
             self.root.destroy()
 
     # ------------------------------------------------------------------
     def run(self) -> None:  # pragma: no cover - visual loop
         self.root.mainloop()
+
+    # ------------------------------------------------------------------
+    def _on_tk_callback_exception(self, exc_type, exc_value, exc_traceback):
+        """Log uncaught exceptions from Tkinter widget callbacks."""
+        try:
+            log.critical("Tkinter callback exception", exc_info=(exc_type, exc_value, exc_traceback))
+        except Exception:
+            # Avoid crashing the UI if logging itself fails
+            pass

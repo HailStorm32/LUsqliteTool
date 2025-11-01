@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional, Type, TypeVar
 
+import logging
 from Domain.domains import (
     Item,
     ObjectTypes,
@@ -13,6 +14,8 @@ from Domain.domains import (
 )
 from Repository.item import ItemRepository
 from Repository.exceptions import *
+
+log = logging.getLogger(__name__)
 
 class BaseService:
     """Common service-layer utilities shared by Item and NPC services.
@@ -66,8 +69,9 @@ class BaseService:
             return self._repo.get(oid)
         except NotFoundError:
             return None
-        except Exception as e:
-            print(f"Error retrieving object {oid}: {e}")
+        except Exception:
+            # Capture full traceback for post-mortem analysis
+            log.exception("Error retrieving object %s", oid)
             return None
 
     def save(self, obj: Any) -> None:
@@ -155,8 +159,8 @@ class ItemService(BaseService):
         try:
            item_list = self._repo.list_items(limit)
 
-        except Exception as e:
-            print(f"Error listing item IDs: {e}")
+        except Exception:
+            log.exception("Error listing item IDs")
             return []
 
         return item_list
@@ -294,8 +298,8 @@ class ItemService(BaseService):
                 try:
                     setattr(dst_obj, attr, getattr(src_obj, attr))
                 except Exception:
-                    # Best-effort; skip attributes that aren't compatible
-                    pass
+                    # Best-effort; log at debug and skip attributes that aren't compatible
+                    log.debug("Failed to copy attribute '%s' during duplicate; skipping", attr, exc_info=True)
 
         src_item_comp = getattr(src.components, 'get', lambda _x: None)('ItemComponent')
         if src_item_comp is not None:
@@ -328,8 +332,8 @@ class ItemService(BaseService):
                         )
                     )
                 except Exception:
-                    # Skip malformed rows
-                    pass
+                    # Log at debug and skip malformed rows
+                    log.debug("Failed to duplicate a skill row for object %s; skipping row", new_id, exc_info=True)
             if new_rows:
                 new_skills = ObjectSkills(skills=new_rows, zero_component_id=getattr(src_skills, 'zero_component_id', True))
                 new_skills.dirty = True

@@ -1,4 +1,5 @@
 import sqlite3
+import logging
 from Domain.domains import *
 from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 
@@ -15,6 +16,7 @@ def _color_id(x: Optional[int | ColorType]) -> Optional[int]:
 class baseRepository:
     def __init__(self, db_file: str):
         self.__db_file = db_file
+        self._log = logging.getLogger(__name__)
 
     def _connect_to_db(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.__db_file)
@@ -153,6 +155,7 @@ class baseRepository:
 
             conn.commit()
         except Exception:
+            self._log.exception("Failed to delete object %s; rolling back", object_id)
             conn.rollback(); raise
         finally:
             conn.close()
@@ -169,6 +172,7 @@ class baseRepository:
             conn.execute("DELETE FROM ItemComponent WHERE id=?", (component_id,))
             conn.commit()
         except Exception:
+            self._log.exception("Failed to delete ItemComponent %s; rolling back", component_id)
             conn.rollback(); raise
         finally:
             conn.close()
@@ -185,6 +189,7 @@ class baseRepository:
             conn.execute("DELETE FROM RenderComponent WHERE id=?", (component_id,))
             conn.commit()
         except Exception:
+            self._log.exception("Failed to delete RenderComponent %s; rolling back", component_id)
             conn.rollback(); raise
         finally:
             conn.close()
@@ -201,6 +206,7 @@ class baseRepository:
             )
             conn.commit()
         except Exception:
+            self._log.exception("Failed to delete skill component for object %s; rolling back", object_id)
             conn.rollback(); raise
         finally:
             conn.close()
@@ -234,7 +240,7 @@ class baseRepository:
                     components["ObjectSkill"] = self.__load_skill_component(conn, object_id, row["component_id"])
 
             if len(components) == 0:
-                print(f"WARNING: No components found for Object ID: {object_id}")
+                self._log.warning("No components found for Object ID: %s", object_id)
 
             return components
 
@@ -391,7 +397,11 @@ class baseRepository:
         if component_id == 0:
             param = object_id
         else:
-            print("Using non standard method to load ObjectSkill")
+            self._log.info(
+                "Using non-standard method to load ObjectSkill (object_id=%s, component_id=%s)",
+                object_id,
+                component_id,
+            )
             param = component_id
 
         # Fetch all the skill rows for the given objectTemplate
@@ -401,7 +411,10 @@ class baseRepository:
         ).fetchall()
 
         if not rows:
-            print(f"WARNING: Object {object_id} has skill entry in ComponentsRegistry but no rows found in ObjectSkills table.")
+            self._log.warning(
+                "Object %s has skill entry in ComponentsRegistry but no rows found in ObjectSkills table.",
+                object_id,
+            )
             # raise NotFoundError(f"ObjectSkills of objectTemplate: {param} not found for object {object_id}",
             #                     table="ObjectSkills", column="objectTemplate", value=param)
 
@@ -435,7 +448,11 @@ class baseRepository:
         # Cycle through the components and save them if they are dirty
         for component_type, component in components.items():
             if component.dirty == False:
-                print(f"DEBUG: Component {component_type} not dirty, skipping save.")
+                self._log.debug(
+                    "Component %s not dirty, skipping save. (object_id=%s)",
+                    component_type,
+                    object_id,
+                )
                 continue
 
             if isinstance(component, ItemComponent) and component.dirty:
@@ -448,7 +465,11 @@ class baseRepository:
                 self.__save_skill_component(conn, object_id, component)
 
             else:
-                print(f"Unknown component type: {component_type}")
+                self._log.error(
+                    "Unknown component type encountered during save: %s (object_id=%s)",
+                    component_type,
+                    object_id,
+                )
 
         # Ensure the ComponentsRegistry is up-to-date
         self.__ensure_component_registry(conn, object_id, components)
@@ -615,7 +636,10 @@ class baseRepository:
             (object_id,)
             )
         else:
-            print(f"WARNING: Saving ObjectSkills for object: {object_id} using non zero component ID, this is not standard!")
+            self._log.warning(
+                "Saving ObjectSkills for object %s using non-zero component ID (non-standard)",
+                object_id,
+            )
             for skill in object_skills.skills:
                 # Delete all existing skills for this object ID
                 conn.execute(
@@ -670,7 +694,10 @@ class baseRepository:
                 if component.zero_component_id:
                     component_id = 0
                 else:
-                    print(f"WARNING: ObjectSkills for object: {object_id} uses non zero component ID in ComponentsRegistry, this is not standard!")
+                    self._log.warning(
+                        "ObjectSkills for object %s uses non-zero component ID in ComponentsRegistry (non-standard)",
+                        object_id,
+                    )
                     component_id = component.skills[0].skill_id if component.skills else 0
 
                 conn.execute(
@@ -678,7 +705,11 @@ class baseRepository:
                     (object_id, Components.SKILL, component_id)
                 )
             else:
-                print(f"ERROR: Unknown component type: {component_type}")
+                self._log.error(
+                    "Unknown component type in registry build: %s (object_id=%s)",
+                    component_type,
+                    object_id,
+                )
 
 
     ############################

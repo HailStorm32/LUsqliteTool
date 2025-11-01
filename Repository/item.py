@@ -59,7 +59,9 @@ class ItemRepository(baseRepository):
 
             return item
 
-        except:
+        except Exception:
+            # Log repository failure with traceback for diagnostics, then re-raise
+            logging.getLogger(__name__).exception("ItemRepository.get(%s) failed", object_id)
             if conn:
                 conn.close()
             raise
@@ -88,6 +90,7 @@ class ItemRepository(baseRepository):
             conn.commit()  # Commit the transaction
 
         except Exception:
+            logging.getLogger(__name__).exception("ItemRepository.save(%s) failed; rolling back", getattr(item, 'object_id', '?'))
             conn.rollback()
             raise
 
