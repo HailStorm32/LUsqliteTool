@@ -454,6 +454,11 @@ class baseRepository:
                     object_id,
                 )
                 continue
+            self._log.debug(
+                "Saving dirty component %s. (object_id=%s)",
+                component_type,
+                object_id,
+            )
 
             if isinstance(component, ItemComponent) and component.dirty:
                 self.__save_item_component(conn, component)
@@ -479,6 +484,8 @@ class baseRepository:
         if self.__get_row_count("Objects", object.object_id) > 1:
             raise DataIntegrityError(f"Multiple rows found for object ID: {object.object_id} in Objects table, cannot save.",
                                      table="Objects", column="id", value=object.object_id)
+
+        self._log.debug("Saving Objects row for object ID: %s", object.object_id)
 
         # LU client database lacks UNIQUE constraints, so we need to handle this manually
         # If the object exists, we update it; otherwise, we insert a new row
