@@ -38,6 +38,28 @@ class BaseObjectEntityTab(ttk.Frame):
         self.search_var = tk.StringVar(value="")
         # Unsaved changes state (UI indicator updated via _update_unsaved_indicator)
         self._has_unsaved_changes = False
+        # Track which text variables are currently showing the special NULL placeholder
+        # so we can interpret it as None on save and manage styling/behavior.
+        # Keyed by the tk.Variable instance used by a field in the form.
+        # Using a plain dict to keep compatibility with older Python/linters
+        self._null_var_flags = {}
+
+    def _var_key(self, var: tk.Variable) -> str:
+        """Return a stable, hashable key for a tk.Variable used in dicts.
+
+        Uses the Tcl variable name when available (e.g., 'PY_VAR42'),
+        otherwise falls back to str(var) or id(var).
+        """
+        try:
+            key = getattr(var, "_name", None)
+            if key:
+                return str(key)
+        except Exception:
+            pass
+        try:
+            return str(var)
+        except Exception:
+            return str(id(var))
 
     # ------------------------------------------------------------------
     # Context menu (right-click) core – delegated to subclasses via hooks
@@ -250,6 +272,8 @@ class BaseObjectEntityTab(ttk.Frame):
         # Clear existing form widgets
         for w in self.form_container.winfo_children():
             w.destroy()
+        # Reset NULL placeholder tracking for the form being (re)built
+        self._null_var_flags = {}
 
         # Get the currently loaded object
         obj = self.current_object
@@ -501,37 +525,75 @@ class BaseObjectEntityTab(ttk.Frame):
                     except Exception:
                         pass
             else:
-                # For non-boolean fields we use a simple text Entry.
-                # If the value looks like an enum (has .name and .value) show the enum name.
-                # If the value is None show an empty string so the Entry is blank.
+                # For non-boolean, non-enum fields we use a text Entry.
+                # Special handling for string fields to support a greyed-out NULL placeholder.
+                is_string_field = (
+                    py_type in (str, 'str')
+                    or declared_type is str
+                )
+
+                # Derive display text for the field
                 if hasattr(value, 'name') and hasattr(value, 'value'):
                     display = value.name
+                elif value is None and is_string_field:
+                    # Show our special placeholder for None strings
+                    display = 'NULL'
                 elif value is None:
                     display = ''
                 else:
-                    # Fallback: convert the value to string for display
                     display = str(value)
 
                 var = tk.StringVar(value=display)
-                entry = ttk.Entry(inner, textvariable=var, width=30)
-                if readonly:
-                    # Use 'readonly' (not 'disabled') so users can select/copy text
+
+                if is_string_field:
+                    # Use tk.Entry (not ttk) so we can control foreground color per-widget
+                    entry = tk.Entry(inner, textvariable=var, width=30)
+                    # If we're showing the NULL placeholder, style it grey and track it
+                    if value is None:
+                        try:
+                            entry.configure(fg="#9CA3AF")  # Tailwind gray-400
+                        except Exception:
+                            pass
+                        self._null_var_flags[self._var_key(var)] = True
+                        # Clear placeholder when user focuses the field so typing just works
+                        try:
+                            entry.bind(
+                                "<FocusIn>",
+                                lambda _e, v=var, ent=entry, fname=f.name: self._clear_string_null_placeholder_on_focus(v, ent, fname),
+                                add=True,
+                            )
+                        except Exception:
+                            pass
+                    if readonly:
+                        try:
+                            entry.configure(state='readonly')
+                        except Exception:
+                            entry.configure(state='disabled')
+                    entry.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                    widget_for_tooltip = entry
+                    # Right-click menu: copy + Set to NULL (only when not readonly)
                     try:
-                        entry.configure(state='readonly')
+                        self._attach_string_field_context_menu(entry, var, f.name, readonly)
                     except Exception:
-                        # Fallback to disabled if theme/widget doesn't support 'readonly'
-                        entry.configure(state='disabled')
-                entry.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
-                widget_for_tooltip = entry
-                # Allow copying from text entries (readonly or editable) via context menu
-                try:
-                    self._attach_copy_context_menu(
-                        entry,
-                        lambda v=var: str(v.get() or ""),
-                        field_name=f.name,
-                    )
-                except Exception:
-                    pass
+                        pass
+                else:
+                    # Non-string text field; standard ttk.Entry is fine
+                    entry = ttk.Entry(inner, textvariable=var, width=30)
+                    if readonly:
+                        try:
+                            entry.configure(state='readonly')
+                        except Exception:
+                            entry.configure(state='disabled')
+                    entry.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                    widget_for_tooltip = entry
+                    try:
+                        self._attach_copy_context_menu(
+                            entry,
+                            lambda v=var: str(v.get() or ""),
+                            field_name=f.name,
+                        )
+                    except Exception:
+                        pass
 
             # Keep track of the field so the Save handler can apply changes later.
             # We save the declared dataclass field type (f.type) to guide basic coercion.
@@ -787,6 +849,91 @@ class BaseObjectEntityTab(ttk.Frame):
 
         try:
             widget.bind("<Button-3>", _show_menu, add=True)
+        except Exception:
+            pass
+
+    def _attach_string_field_context_menu(self, widget: tk.Widget, var: tk.StringVar, field_name: str, readonly: bool) -> None:
+        """Attach a right-click menu for string Entry fields.
+
+        Includes:
+        - Copy value
+        - Set to NULL (adds grey placeholder), only when not readonly
+        """
+        if widget is None:
+            return
+
+        def _do_copy() -> None:
+            try:
+                self._copy_value_to_clipboard(str(var.get() or ""), field_name)
+            except Exception:
+                log.exception("Copy failed for field '%s' (object_id=%s)", field_name, getattr(getattr(self, 'current_object', None), 'object_id', None))
+
+        def _do_set_null() -> None:
+            try:
+                self._set_string_field_to_null(widget, var, field_name)
+            except Exception:
+                log.exception("Set NULL failed for field '%s' (object_id=%s)", field_name, getattr(getattr(self, 'current_object', None), 'object_id', None))
+
+        def _show_menu(event: tk.Event) -> str:
+            try:
+                menu = tk.Menu(widget, tearoff=0)  # type: ignore[arg-type]
+                menu.add_command(label="Copy value", command=_do_copy)
+                if not readonly:
+                    menu.add_command(label="Set to NULL", command=_do_set_null)
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)  # type: ignore[attr-defined]
+                finally:
+                    try:
+                        menu.grab_release()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return "break"
+
+        try:
+            widget.bind("<Button-3>", _show_menu, add=True)
+        except Exception:
+            pass
+
+    def _set_string_field_to_null(self, entry: tk.Widget, var: tk.StringVar, field_name: str) -> None:
+        """Set a string field to represent SQL NULL in the UI and track it for save-time conversion.
+
+        - Sets the entry text to 'NULL'
+        - Greys out the text
+        - Flags the variable so _on_save will store None
+        - Marks the form as having unsaved changes
+        """
+        try:
+            var.set("NULL")
+            self._null_var_flags[self._var_key(var)] = True
+            try:
+                # tk.Entry supports 'fg'; ttk.Entry does not. Ignore failures silently.
+                entry.configure(fg="#9CA3AF")
+            except Exception:
+                pass
+            # Log with context
+            oid = getattr(getattr(self, 'current_object', None), 'object_id', None)
+            log.info("Field '%s' set to NULL placeholder (object_id=%s)", field_name, oid)
+            # Mark unsaved since this is a user action
+            self._mark_unsaved()
+        except Exception:
+            pass
+
+    def _clear_string_null_placeholder_on_focus(self, var: tk.StringVar, entry: tk.Widget, field_name: str) -> None:
+        """Clear the grey 'NULL' placeholder when the field gains focus to let the user type.
+
+        Keeps behavior simple and predictable; the user can still re-apply NULL via the context menu.
+        """
+        try:
+            if self._null_var_flags.get(self._var_key(var), False):
+                var.set("")
+                self._null_var_flags[self._var_key(var)] = False
+                try:
+                    entry.configure(fg="#000000")
+                except Exception:
+                    pass
+                # No need to mark unsaved here; the trace on var will do it after first keystroke
         except Exception:
             pass
 
@@ -1232,6 +1379,18 @@ class BaseObjectEntityTab(ttk.Frame):
         for name, var, typ, readonly in entry_widgets:
             if readonly:
                 continue
+            # Special-case: our NULL placeholder for string fields. If active, persist None and skip parsing.
+            try:
+                if (typ in (str, 'str')) and self._null_var_flags.get(self._var_key(var), False):
+                    old_val = getattr(target_obj, name, None)
+                    if old_val is not None:
+                        setattr(target_obj, name, None)
+                        any_changed = True
+                    # When already None, no change needed
+                    continue
+            except Exception:
+                # Fall through to normal handling if anything goes wrong
+                pass
             raw = var.get()
             old_val = getattr(target_obj, name, None)
             if isinstance(var, tk.BooleanVar):
@@ -1241,7 +1400,12 @@ class BaseObjectEntityTab(ttk.Frame):
                     any_changed = True
                 continue
             if raw == '':
-                new_val = None
+                # Empty string should be saved as empty string for string-typed fields.
+                # For non-string types, treat empty as None to represent SQL NULL.
+                if typ in (str, 'str'):
+                    new_val = ''
+                else:
+                    new_val = None
             else:
                 try:
                     if isinstance(typ, type) and issubclass(typ, Enum):
@@ -1316,6 +1480,23 @@ class BaseObjectEntityTab(ttk.Frame):
             if new_val != old_val:
                 setattr(target_obj, name, new_val)
                 any_changed = True
+
+        # Translate any active NULL placeholders for string fields to None before marking dirty
+        try:
+            for name, var, typ, readonly in entry_widgets:
+                if readonly:
+                    continue
+                if (typ in (str, 'str')) and self._null_var_flags.get(self._var_key(var), False):
+                    old_val = getattr(target_obj, name, None)
+                    if old_val is not None:
+                        setattr(target_obj, name, None)
+                        any_changed = True
+                    else:
+                        # Already None; nothing to change
+                        pass
+        except Exception:
+            # Don't block save on placeholder handling failure
+            log.exception("Failed translating NULL placeholder to None during save (object_id=%s)", getattr(obj, 'object_id', None))
 
         # Mark dirty
         try:
