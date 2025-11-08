@@ -207,6 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 #User added ignores
+logs/
 *.sqlite
 *.png
 .vscode/
+*.bak

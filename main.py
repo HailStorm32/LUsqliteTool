@@ -1,4 +1,5 @@
 import logging
+import shutil
 from pathlib import Path
 from tkinter import filedialog
 
@@ -52,6 +53,20 @@ def main() -> None:
     if not db_file.exists():
         log.error("Database not found: %s", db_file)
         return
+
+    # ---------------------------------------------------------------
+    # Backup the database file before opening it.
+    # We overwrite any previous backup from a prior session so the user
+    # always has a snapshot of the file as it existed at startup.
+    # Using copy2 to preserve metadata (timestamps) where possible.
+    # ---------------------------------------------------------------
+    try:
+        backup_path = db_file.with_suffix(db_file.suffix + ".bak")
+        shutil.copy2(db_file, backup_path)
+        log.info("Database backup created at: %s", backup_path)
+    except Exception:
+        # Log the failure but continue launching; the backup is a safety net
+        log.exception("Failed to create database backup for %s", db_file)
 
     log.info("Starting application with database: %s", db_file)
     # Pass the version to the GUI so it can be displayed in the window title
