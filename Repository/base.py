@@ -229,6 +229,19 @@ class baseRepository:
                 (object_id,)
             ).fetchall()
 
+            # Some DB rows are missing the skill entry in ComponentsRegistry even though
+            # ObjectSkills already contains rows for this object. Repair that mismatch
+            # during load so the caller sees the skill component and future saves/deletes
+            # operate against a consistent registry.
+            has_skill_registry_entry = any(
+                row["component_type"] == Components.SKILL for row in component_rows
+            )
+            if not has_skill_registry_entry and self.__backfill_missing_skill_registry_entry(conn, object_id):
+                component_rows = conn.execute(
+                    "SELECT component_type, component_id FROM ComponentsRegistry WHERE id=?",
+                    (object_id,)
+                ).fetchall()
+
             for row in component_rows:
                 if row["component_type"] == Components.ITEM:
                     components["ItemComponent"] = self.__load_item_component(conn, object_id, row["component_id"])
@@ -246,6 +259,35 @@ class baseRepository:
 
         finally:
             conn.close()
+
+    def __object_has_skill_rows(self, conn: sqlite3.Connection, object_id: int) -> bool:
+        """Return True when ObjectSkills already contains at least one row for the object."""
+        row = conn.execute(
+            "SELECT 1 FROM ObjectSkills WHERE objectTemplate=? LIMIT 1",
+            (object_id,),
+        ).fetchone()
+        return row is not None
+
+    def __backfill_missing_skill_registry_entry(self, conn: sqlite3.Connection, object_id: int) -> bool:
+        """Add the missing skill registry row when ObjectSkills exists without registry metadata."""
+        if not self.__object_has_skill_rows(conn, object_id):
+            return False
+
+        # ObjectSkills uses component_id=0 in the standard LU schema. We only create the
+        # registry metadata row here; the actual skill rows are already present.
+        self._log.info(
+            "Backfilling missing ObjectSkills ComponentsRegistry entry for object %s",
+            object_id,
+        )
+        conn.execute(
+            "INSERT INTO ComponentsRegistry (id, component_type, component_id) VALUES (?, ?, ?)",
+            (object_id, Components.SKILL, 0),
+        )
+
+        # Persist immediately because this repair happens inside a read/load path and there
+        # is no outer save/commit that would otherwise write the new registry row to disk.
+        conn.commit()
+        return True
 
     def _load_object_table(self, object: GameObject) -> None:
         """Load the object data from the database."""

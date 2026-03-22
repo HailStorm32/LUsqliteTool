@@ -96,6 +96,10 @@ NPC (mission):
     - CurrencyTable *?
   - MissionNPCComponent (73)
     - Missions
+    - MissionTasks
+    - MissionText
+    - MissionEmail *
+    - Icons
   - ScriptComponent (5) **
 
 
@@ -104,6 +108,9 @@ Item:
 - ComponentsRegistry
   - RenderComponent (2)
   - ItemComponent (11)
+    "decal" column links to one of the following if torso or leg:
+    - MinifigDecals_Torsos
+    - MinifigDecals_legs
   - ObjectSkill (9)
 
 * Optional
