@@ -175,6 +175,40 @@ class BaseService:
             return self._repo.get_lookup_options(lookup_name)
         return []
 
+    def _get_metadata_defaults(
+        self,
+        metadata_key: str,
+        *,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        defaults: dict[str, Any] = {}
+        for field_name, meta in component_field_metadata.get(metadata_key, {}).items():
+            if "default" not in meta:
+                continue
+            value = meta.get("default")
+            if isinstance(value, dict):
+                value = value.get(profile)
+            if value is None:
+                continue
+            defaults[field_name] = deepcopy(value)
+        return defaults
+
+    def _apply_metadata_defaults(self, target: Any, metadata_key: str, *, profile: str | None = None) -> None:
+        for field_name, value in self._get_metadata_defaults(metadata_key, profile=profile).items():
+            setattr(target, field_name, value)
+
+    def _build_component_with_metadata_defaults(
+        self,
+        component_cls: Type[Any],
+        metadata_key: str,
+        *,
+        profile: str | None = None,
+        **overrides: Any,
+    ) -> Any:
+        values = self._get_metadata_defaults(metadata_key, profile=profile)
+        values.update(overrides)
+        return component_cls(**values)
+
     def _copy_fields(self, src_obj: Any, dst_obj: Any, *, exclude: set[str] | None = None) -> None:
         """Best-effort attribute copier used by duplicate flows."""
         exclude = set(exclude or set()) | {"dirty"}
@@ -275,9 +309,17 @@ class ItemService(BaseService):
         item.dirty = True
 
         # Attach default RenderComponent and ItemComponent; mark dirty so they are saved
-        render = RenderComponent(id=render_comp_id)
+        render = self._build_component_with_metadata_defaults(
+            RenderComponent,
+            "RenderComponent",
+            id=render_comp_id,
+        )
         render.dirty = True
-        item_comp = ItemComponent(id=item_comp_id)
+        item_comp = self._build_component_with_metadata_defaults(
+            ItemComponent,
+            "ItemComponent",
+            id=item_comp_id,
+        )
         item_comp.dirty = True
         item.components = {
             "RenderComponent": render,
@@ -427,7 +469,11 @@ class ItemService(BaseService):
         if item.components.get("ItemComponent") is not None:
             return item.components["ItemComponent"]  # type: ignore[index]
         comp_id = self.generate_new_component_id(item.object_id, "ItemComponent")
-        comp = ItemComponent(id=comp_id)
+        comp = self._build_component_with_metadata_defaults(
+            ItemComponent,
+            "ItemComponent",
+            id=comp_id,
+        )
         comp.dirty = True
         item.components["ItemComponent"] = comp
         return comp
@@ -437,7 +483,11 @@ class ItemService(BaseService):
         if item.components.get("RenderComponent") is not None:
             return item.components["RenderComponent"]  # type: ignore[index]
         comp_id = self.generate_new_component_id(item.object_id, "RenderComponent")
-        comp = RenderComponent(id=comp_id)
+        comp = self._build_component_with_metadata_defaults(
+            RenderComponent,
+            "RenderComponent",
+            id=comp_id,
+        )
         comp.dirty = True
         item.components["RenderComponent"] = comp
         return comp
@@ -639,41 +689,6 @@ class NPCService(BaseService):
     def _collect_mission_email_ids(self, npc: NPC) -> set[int]:
         return self._collect_row_values(npc, ("MissionEmail",), "id")
 
-    def _get_metadata_defaults(
-        self,
-        metadata_key: str,
-        *,
-        profile: str | None = None,
-    ) -> dict[str, Any]:
-        defaults: dict[str, Any] = {}
-        for field_name, meta in component_field_metadata.get(metadata_key, {}).items():
-            if "default" not in meta:
-                continue
-            value = meta.get("default")
-            if isinstance(value, dict):
-                value = value.get(profile)
-            if value is None:
-                continue
-            defaults[field_name] = deepcopy(value)
-        return defaults
-
-    def _apply_metadata_defaults(self, target: Any, metadata_key: str, *, profile: str | None = None) -> None:
-        for field_name, value in self._get_metadata_defaults(metadata_key, profile=profile).items():
-            setattr(target, field_name, value)
-
-    def _build_component_with_metadata_defaults(
-        self,
-        component_cls: Type[Any],
-        metadata_key: str,
-        component_id: int,
-        *,
-        profile: str | None = None,
-    ) -> Any:
-        return component_cls(
-            id=component_id,
-            **self._get_metadata_defaults(metadata_key, profile=profile),
-        )
-
     def create_default_vendor_npc(self, object_id: int | None = None) -> NPC:
         new_id = self._resolve_new_object_id(object_id)
         log.info("Creating default vendor NPC object_id=%s", new_id)
@@ -683,7 +698,7 @@ class NPCService(BaseService):
         render = self._build_component_with_metadata_defaults(
             RenderComponent,
             "RenderComponent",
-            self._repo.generate_new_component_id(new_id, "RenderComponent"),
+            id=self._repo.generate_new_component_id(new_id, "RenderComponent"),
             profile="vendor",
         )
         render.dirty = True
@@ -691,14 +706,17 @@ class NPCService(BaseService):
         minifig = self._build_component_with_metadata_defaults(
             MinifigComponent,
             "MinifigComponent",
-            self._repo.generate_new_component_id(new_id, "MinifigComponent"),
+            id=self._repo.generate_new_component_id(new_id, "MinifigComponent"),
         )
         minifig.dirty = True
         npc.components["MinifigComponent"] = minifig
-        npc.components["PhysicsComponent"] = PhysicsComponent(
+        physics = self._build_component_with_metadata_defaults(
+            PhysicsComponent,
+            "PhysicsComponent",
             id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"),
-            dirty=True,
         )
+        physics.dirty = True
+        npc.components["PhysicsComponent"] = physics
         self._ensure_component_row_collection(
             npc,
             "InventoryComponent",
@@ -706,7 +724,9 @@ class NPCService(BaseService):
             key_field="itemid",
             label_prefix="Item",
         )
-        vendor = VendorComponent(
+        vendor = self._build_component_with_metadata_defaults(
+            VendorComponent,
+            "VendorComponent",
             id=self._repo.generate_new_component_id(new_id, "VendorComponent"),
             loot_matrix_index=self._reserve_next_int(
                 self._repo.generate_new_loot_matrix_index,
@@ -714,8 +734,8 @@ class NPCService(BaseService):
                 label="loot_matrix_index",
                 object_id=new_id,
             ),
-            dirty=True,
         )
+        vendor.dirty = True
         npc.components["VendorComponent"] = vendor
         npc.components["VendorLootMatrix"] = RowCollection(
             rows=[],
@@ -743,7 +763,7 @@ class NPCService(BaseService):
         render = self._build_component_with_metadata_defaults(
             RenderComponent,
             "RenderComponent",
-            self._repo.generate_new_component_id(new_id, "RenderComponent"),
+            id=self._repo.generate_new_component_id(new_id, "RenderComponent"),
             profile="mission",
         )
         render.dirty = True
@@ -751,14 +771,17 @@ class NPCService(BaseService):
         minifig = self._build_component_with_metadata_defaults(
             MinifigComponent,
             "MinifigComponent",
-            self._repo.generate_new_component_id(new_id, "MinifigComponent"),
+            id=self._repo.generate_new_component_id(new_id, "MinifigComponent"),
         )
         minifig.dirty = True
         npc.components["MinifigComponent"] = minifig
-        npc.components["PhysicsComponent"] = PhysicsComponent(
+        physics = self._build_component_with_metadata_defaults(
+            PhysicsComponent,
+            "PhysicsComponent",
             id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"),
-            dirty=True,
         )
+        physics.dirty = True
+        npc.components["PhysicsComponent"] = physics
         self._ensure_component_row_collection(
             npc,
             "InventoryComponent",
@@ -777,7 +800,7 @@ class NPCService(BaseService):
         comp = self._build_component_with_metadata_defaults(
             RenderComponent,
             "RenderComponent",
-            self._repo.generate_new_component_id(npc.object_id, "RenderComponent"),
+            id=self._repo.generate_new_component_id(npc.object_id, "RenderComponent"),
             profile=(
                 "vendor"
                 if isinstance(npc.components.get("VendorComponent"), VendorComponent)
@@ -797,7 +820,7 @@ class NPCService(BaseService):
         comp = self._build_component_with_metadata_defaults(
             MinifigComponent,
             "MinifigComponent",
-            self._repo.generate_new_component_id(npc.object_id, "MinifigComponent"),
+            id=self._repo.generate_new_component_id(npc.object_id, "MinifigComponent"),
         )
         comp.dirty = True
         npc.components["MinifigComponent"] = comp
@@ -807,7 +830,12 @@ class NPCService(BaseService):
         comp = npc.components.get("PhysicsComponent")
         if isinstance(comp, PhysicsComponent):
             return comp
-        comp = PhysicsComponent(id=self._repo.generate_new_component_id(npc.object_id, "PhysicsComponent"), dirty=True)
+        comp = self._build_component_with_metadata_defaults(
+            PhysicsComponent,
+            "PhysicsComponent",
+            id=self._repo.generate_new_component_id(npc.object_id, "PhysicsComponent"),
+        )
+        comp.dirty = True
         npc.components["PhysicsComponent"] = comp
         return comp
 
@@ -824,7 +852,9 @@ class NPCService(BaseService):
         comp = npc.components.get("VendorComponent")
         if isinstance(comp, VendorComponent):
             return comp
-        comp = VendorComponent(
+        comp = self._build_component_with_metadata_defaults(
+            VendorComponent,
+            "VendorComponent",
             id=self._repo.generate_new_component_id(npc.object_id, "VendorComponent"),
             loot_matrix_index=self._reserve_next_int(
                 self._repo.generate_new_loot_matrix_index,
@@ -832,8 +862,8 @@ class NPCService(BaseService):
                 label="loot_matrix_index",
                 object_id=npc.object_id,
             ),
-            dirty=True,
         )
+        comp.dirty = True
         npc.components["VendorComponent"] = comp
         npc.components["VendorLootMatrix"] = RowCollection(
             rows=[],
@@ -855,7 +885,9 @@ class NPCService(BaseService):
         comp = npc.components.get("DestructibleComponent")
         if isinstance(comp, DestructibleComponent):
             return comp
-        comp = DestructibleComponent(
+        comp = self._build_component_with_metadata_defaults(
+            DestructibleComponent,
+            "DestructibleComponent",
             id=self._repo.generate_new_component_id(npc.object_id, "DestructibleComponent"),
             loot_matrix_index=self._reserve_next_int(
                 self._repo.generate_new_loot_matrix_index,
@@ -869,8 +901,8 @@ class NPCService(BaseService):
                 label="currency_index",
                 object_id=npc.object_id,
             ),
-            dirty=True,
         )
+        comp.dirty = True
         npc.components["DestructibleComponent"] = comp
         npc.components["DestructibleLootMatrix"] = RowCollection(
             rows=[],
@@ -899,7 +931,12 @@ class NPCService(BaseService):
         comp = npc.components.get("ScriptComponent")
         if isinstance(comp, ScriptComponent):
             return comp
-        comp = ScriptComponent(id=self._repo.generate_new_component_id(npc.object_id, "ScriptComponent"), dirty=True)
+        comp = self._build_component_with_metadata_defaults(
+            ScriptComponent,
+            "ScriptComponent",
+            id=self._repo.generate_new_component_id(npc.object_id, "ScriptComponent"),
+        )
+        comp.dirty = True
         npc.components["ScriptComponent"] = comp
         return comp
 
