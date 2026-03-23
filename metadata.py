@@ -152,3 +152,51 @@ component_field_metadata = {
         "ai_combat_weight":       { "tip": "AI combat weight / priority",             "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True  },
     }
 }
+
+component_field_metadata.setdefault("RenderComponent", {}).setdefault("icon_id", {}).update({
+    "lookup": "icons",
+})
+
+for component_name in ("MinifigComponent", "PhysicsComponent", "DestructibleComponent", "VendorComponent", "ScriptComponent"):
+    component_field_metadata.setdefault(component_name, {}).setdefault("id", {}).update({
+        "readonly": True,
+        "type": int,
+    })
+
+component_field_metadata.setdefault("MinifigComponent", {}).setdefault("chestdecal", {}).update({
+    "lookup": "minifig_torsos",
+    "type": int,
+})
+
+component_field_metadata.setdefault("InventoryComponentRow", {}).setdefault("id", {}).update({
+    "readonly": True,
+    "type": int,
+})
+component_field_metadata.setdefault("MissionNPCComponentRow", {}).setdefault("id", {}).update({
+    "readonly": True,
+    "type": int,
+})
+component_field_metadata.setdefault("LootMatrixRow", {}).setdefault("row_id", {}).update({
+    "readonly": True,
+    "type": int,
+})
+component_field_metadata.setdefault("MissionTaskRow", {}).setdefault("icon_id", {}).update({
+    "lookup": "icons",
+    "type": int,
+})
+component_field_metadata.setdefault("MissionTaskRow", {}).setdefault("large_task_icon_id", {}).update({
+    "lookup": "icons",
+    "type": int,
+})
+component_field_metadata.setdefault("MissionTextRow", {}).setdefault("icon_id", {}).update({
+    "lookup": "icons",
+    "type": int,
+})
+component_field_metadata.setdefault("MissionTextRow", {}).setdefault("turn_in_icon_id", {}).update({
+    "lookup": "icons",
+    "type": int,
+})
+component_field_metadata.setdefault("MissionRow", {}).setdefault("mission_icon_id", {}).update({
+    "lookup": "icons",
+    "type": int,
+})

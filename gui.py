@@ -9,7 +9,7 @@ from pathlib import Path
 from Service.services import ItemService, NPCService
 from metadata import component_field_metadata
 from dataclasses import fields, is_dataclass
-from typing import Any, Callable
+from typing import Any, Callable, get_args, get_origin
 from Domain.domains import ColorType  # Color enum used for item color field and swatch
 
 # Import Item for type hinting
@@ -43,6 +43,7 @@ class BaseObjectEntityTab(ttk.Frame):
         # Keyed by the tk.Variable instance used by a field in the form.
         # Using a plain dict to keep compatibility with older Python/linters
         self._null_var_flags = {}
+        self._lookup_cache: dict[str, list[dict[str, Any]]] = {}
 
     def _var_key(self, var: tk.Variable) -> str:
         """Return a stable, hashable key for a tk.Variable used in dicts.
@@ -60,6 +61,302 @@ class BaseObjectEntityTab(ttk.Frame):
             return str(var)
         except Exception:
             return str(id(var))
+
+    def _normalize_field_type(self, field_type: Any) -> Any:
+        """Collapse Optional/union annotations down to the concrete editable type."""
+        if field_type is None:
+            return None
+        if isinstance(field_type, str):
+            type_name = field_type.replace(" ", "")
+            if type_name.startswith("Optional[") and type_name.endswith("]"):
+                return self._normalize_field_type(type_name[9:-1])
+            if "|" in type_name:
+                members = [member for member in type_name.split("|") if member not in {"None", "NoneType"}]
+                if len(members) == 1:
+                    return self._normalize_field_type(members[0])
+            builtin_types = {
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "str": str,
+                "ColorType": ColorType,
+            }
+            return builtin_types.get(type_name, globals().get(type_name, field_type))
+
+        origin = get_origin(field_type)
+        if origin is not None:
+            members = [member for member in get_args(field_type) if member is not type(None)]
+            if len(members) == 1:
+                return self._normalize_field_type(members[0])
+        return field_type
+
+    def _is_row_collection_component(self, component: Any) -> bool:
+        return bool(component is not None and hasattr(component, "rows") and hasattr(component, "key_field"))
+
+    def _get_component_rows(self, component: Any) -> list[Any]:
+        rows = getattr(component, "rows", None)
+        return list(rows or [])
+
+    def _set_component_rows(self, component: Any, rows: list[Any]) -> None:
+        # ObjectSkills exposes a read-only rows property backed by skills.
+        if hasattr(component, "skills"):
+            component.skills = rows
+            return
+        component.rows = rows
+
+    def _get_component_key_field(self, component: Any) -> str:
+        return str(getattr(component, "key_field", "id"))
+
+    def _get_component_label_prefix(self, component: Any) -> str:
+        return str(getattr(component, "label_prefix", "Row"))
+
+    def _get_collection_row_key(self, component: Any, row: Any) -> Any:
+        return getattr(row, self._get_component_key_field(component), None)
+
+    def _get_collection_row_display_key(self, component: Any, row: Any) -> Any:
+        # Some collections use a temporary UI key before the database assigns a
+        # persisted identity. In that case we keep tree identity stable with the
+        # UI key, but show a cleaner display key in labels/titles.
+        display_key = getattr(row, "display_key", None)
+        if display_key is not None:
+            return display_key
+        return self._get_collection_row_key(component, row)
+
+    def _iter_collection_parent_iids(self, obj_id: int, component_type: str) -> list[str]:
+        return [
+            f"{self._make_root_iid(obj_id)}:{component_type}",
+            f"{self._make_root_iid_alt(obj_id)}:{component_type}",
+        ]
+
+    def _find_collection_row_iid(self, obj_id: int, component_type: str, row_key: Any) -> str | None:
+        for parent_iid in self._iter_collection_parent_iids(obj_id, component_type):
+            row_iid = f"{parent_iid}:{row_key}"
+            if self.tree.exists(row_iid):
+                return row_iid
+        return None
+
+    def _parse_collection_key(self, component: Any, raw_key: Any) -> Any:
+        key_field = self._get_component_key_field(component)
+        rows = self._get_component_rows(component)
+        for row in rows:
+            value = self._get_collection_row_key(component, row)
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                text = str(raw_key).strip().lower()
+                if text in {"true", "1", "yes"}:
+                    return True
+                if text in {"false", "0", "no"}:
+                    return False
+            if isinstance(value, int):
+                try:
+                    return int(raw_key)
+                except Exception:
+                    return raw_key
+            if isinstance(value, float):
+                try:
+                    return float(raw_key)
+                except Exception:
+                    return raw_key
+            return raw_key
+        try:
+            return int(raw_key)
+        except Exception:
+            return raw_key
+
+    def _find_component_row(self, component: Any, raw_key: Any) -> Any | None:
+        key_field = self._get_component_key_field(component)
+        parsed_key = self._parse_collection_key(component, raw_key)
+        for row in self._get_component_rows(component):
+            value = self._get_collection_row_key(component, row)
+            if value == parsed_key or str(value) == str(raw_key):
+                return row
+        return None
+
+    def _format_collection_row_text(self, component: Any, row: Any) -> str:
+        prefix = self._get_component_label_prefix(component)
+        return f"{prefix} {self._get_collection_row_display_key(component, row)}"
+
+    def _resolve_form_target(
+        self,
+        obj: Any,
+        component_type: str,
+        grandchild_iid: str | None = None,
+    ) -> dict[str, Any]:
+        if obj is None:
+            return {"message": "No object loaded"}
+
+        if component_type == "object":
+            return {
+                "target": obj,
+                "exclude": {"components", "dirty"},
+                "title": f"GameObject: ({obj.object_id}) {obj.name}",
+                "metadata_key": "GameObject",
+                "collection": None,
+                "key_field": None,
+                "original_key": None,
+            }
+
+        component = obj.components.get(component_type)
+        if component is None:
+            return {"message": f"Component '{component_type}' not present"}
+
+        if self._is_row_collection_component(component):
+            key_field = self._get_component_key_field(component)
+            row = None
+            if grandchild_iid is None:
+                rows = self._get_component_rows(component)
+                if not rows:
+                    return {"message": "No rows available"}
+                row = rows[0]
+                grandchild_iid = str(self._get_collection_row_key(component, row) or "")
+            else:
+                row = self._find_component_row(component, grandchild_iid)
+            if row is None:
+                return {"message": f"Row '{grandchild_iid}' not found"}
+            return {
+                "target": row,
+                "exclude": {"dirty"},
+                "title": f"{component_type} row {self._get_collection_row_display_key(component, row)} of {obj.object_id}",
+                "metadata_key": row.__class__.__name__,
+                "collection": component,
+                "key_field": key_field,
+                "original_key": self._get_collection_row_key(component, row),
+                "resolved_grandchild_iid": str(self._get_collection_row_key(component, row) or ""),
+            }
+
+        return {
+            "target": component,
+            "exclude": {"dirty"},
+            "title": f"Component '{component_type}' of {obj.object_id}",
+            "metadata_key": component_type,
+            "collection": None,
+            "key_field": None,
+            "original_key": None,
+        }
+
+    def _get_lookup_options(self, lookup_name: str) -> list[dict[str, Any]]:
+        if lookup_name not in self._lookup_cache:
+            try:
+                self._lookup_cache[lookup_name] = self._service.get_lookup_options(lookup_name)
+            except Exception:
+                log.exception("Failed loading lookup options for %s", lookup_name)
+                self._lookup_cache[lookup_name] = []
+        return list(self._lookup_cache.get(lookup_name, []))
+
+    def _format_lookup_label(self, option: dict[str, Any]) -> str:
+        ident = option.get("id", "")
+        label = str(option.get("label") or "").strip()
+        return f"({ident}) {label}" if label else f"({ident})"
+
+    def _build_lookup_display(self, lookup_name: str, current_value: Any) -> tuple[list[str], str]:
+        options = self._get_lookup_options(lookup_name)
+        values = [self._format_lookup_label(option) for option in options]
+        if current_value in (None, ""):
+            return values, ""
+        for option in options:
+            if option.get("id") == current_value:
+                return values, self._format_lookup_label(option)
+        missing = f"({current_value}) [missing]"
+        if missing not in values:
+            values.append(missing)
+        return values, missing
+
+    def _parse_lookup_value(self, selection: Any) -> int | None:
+        text = str(selection or "").strip()
+        if not text:
+            return None
+        if text.startswith("(") and ")" in text:
+            try:
+                return int(text[1:text.index(")")])
+            except Exception:
+                return None
+        try:
+            return int(text)
+        except Exception:
+            return None
+
+    def _sync_collection_row_node(self, obj_id: int, component_type: str, component: Any, original_key: Any, row: Any) -> None:
+        """Keep collection-node identity stable when the edited row key changes."""
+        if component is None:
+            return
+        new_key = self._get_collection_row_key(component, row)
+        if original_key == new_key:
+            current_iid = self._find_collection_row_iid(obj_id, component_type, new_key)
+            if current_iid is not None:
+                try:
+                    self.tree.item(current_iid, text=self._format_collection_row_text(component, row))
+                except Exception:
+                    pass
+            return
+
+        for parent_iid in self._iter_collection_parent_iids(obj_id, component_type):
+            old_iid = f"{parent_iid}:{original_key}"
+            new_iid = f"{parent_iid}:{new_key}"
+            if not self.tree.exists(old_iid):
+                continue
+            if self.tree.exists(new_iid):
+                try:
+                    self.tree.delete(old_iid)
+                except Exception:
+                    pass
+                try:
+                    self.tree.item(new_iid, text=self._format_collection_row_text(component, row))
+                    self.tree.selection_set(new_iid)
+                    self.tree.focus(new_iid)
+                    self._last_grandchild_iid = str(new_key)
+                except Exception:
+                    pass
+                return
+            try:
+                idx = self.tree.index(old_iid)
+            except Exception:
+                idx = tk.END
+            try:
+                self.tree.insert(parent_iid, idx, iid=new_iid, text=self._format_collection_row_text(component, row))
+                self.tree.delete(old_iid)
+                self.tree.selection_set(new_iid)
+                self.tree.focus(new_iid)
+                self._last_grandchild_iid = str(new_key)
+            except Exception:
+                pass
+            return
+
+    def _populate_object_children(self, parent_iid: str, obj: Any) -> None:
+        """Populate the fixed three-level tree: object -> component/group -> row."""
+        # Keep row collections flat under their group node so deeper schema chains
+        # still fit the existing tree without turning the sidebar into a maze.
+        for key, component in (getattr(obj, "components", {}) or {}).items():
+            child_iid = f"{parent_iid}:{key}"
+            self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
+            if not self._is_row_collection_component(component):
+                continue
+            for row in self._get_component_rows(component):
+                row_key = self._get_collection_row_key(component, row)
+                self.tree.insert(
+                    child_iid,
+                    tk.END,
+                    iid=f"{child_iid}:{row_key}",
+                    text=self._format_collection_row_text(component, row),
+                )
+
+    def _refresh_object_branch(self, object_id: int, obj: Any | None = None) -> str | None:
+        """Rebuild one root branch from the cached object after local edits."""
+        candidate_iids = [self._make_root_iid(object_id), self._make_root_iid_alt(object_id)]
+        root_iid = next((iid for iid in candidate_iids if self.tree.exists(iid)), None)
+        if root_iid is None:
+            return None
+        try:
+            for child in self.tree.get_children(root_iid):
+                self.tree.delete(child)
+        except Exception:
+            pass
+        if obj is None:
+            obj = self._object_cache.get(object_id)
+        if obj is None:
+            return root_iid
+        self._populate_object_children(root_iid, obj)
+        return root_iid
 
     # ------------------------------------------------------------------
     # Context menu (right-click) core – delegated to subclasses via hooks
@@ -277,64 +574,17 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Get the currently loaded object
         obj = self.current_object
-        if obj is None:
-            self._show_message("No object loaded")
+        form_target = self._resolve_form_target(obj, component_type, grandchild_iid)
+        if "message" in form_target:
+            self._show_message(str(form_target["message"]))
             return
 
-        ####
-        # Special case: object entity itself
-        ####
-        if component_type == "object":
-            target_obj = obj  # GameObject fields
-
-            # Set title and component class members to not display
-            title = f"GameObject: ({obj.object_id}) {obj.name}"
-            exclude = {"components", "dirty"}
-
-        ####
-        # Special case: ObjectSkill component with skill ID sub-selection
-        ####
-        elif component_type == "ObjectSkill":
-            if grandchild_iid is None:
-                self._show_message("No skill selected")
-                return
-
-            # Parse skill ID
-            try:
-                skill_id = int(grandchild_iid)
-            except ValueError:
-                self._show_message("Invalid skill ID")
-                return
-
-            # Find the skill object with the given skill_id
-            object_skill_component = obj.components.get("ObjectSkill", None)
-            target_obj = None
-            if object_skill_component is not None and hasattr(object_skill_component, "skills"):
-                for skill in object_skill_component.skills:
-                    if getattr(skill, "skill_id", None) == skill_id:
-                        target_obj = skill
-                        break
-
-            if target_obj is None:
-                self._show_message(f"Skill ID {skill_id} not found")
-                return
-
-            # Set title and component class members to not display
-            title = f"Skill ID {skill_id} of {obj.object_id}"
-            exclude = {"dirty"}
-
-        ####
-        # General case: other components
-        ####
-        else:
-            target_obj = obj.components.get(component_type)
-            if target_obj is None:
-                self._show_message(f"Component '{component_type}' not present")
-                return
-
-            # Set title and component class members to not display
-            title = f"Component '{component_type}' of {obj.object_id}"
-            exclude = {"dirty"}
+        target_obj = form_target["target"]
+        title = str(form_target["title"])
+        exclude = set(form_target["exclude"])
+        resolved_grandchild_iid = form_target.get("resolved_grandchild_iid")
+        if resolved_grandchild_iid is not None:
+            self._last_grandchild_iid = str(resolved_grandchild_iid)
 
         self.detail_label.configure(text=title)
 
@@ -344,15 +594,9 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Store entry widgets for saving (name, tk.Variable, py_type, readonly)
         self._entry_widgets: list[tuple[str, tk.Variable, Any, bool]] = []
+        self._field_lookup_names: dict[str, str] = {}
 
-        # Resolve metadata key used for lookup into component_field_metadata.
-        if component_type == "object":
-            metadata_key = "GameObject"
-        elif component_type == "ObjectSkill":
-            metadata_key = "ObjectSkillRow"
-        else:
-            metadata_key = component_type
-        comp_meta = component_field_metadata.get(metadata_key, {})
+        comp_meta = component_field_metadata.get(str(form_target["metadata_key"]), {})
 
         # Build a scrollable canvas for many fields
         canvas = tk.Canvas(self.form_container, highlightthickness=0)
@@ -382,10 +626,11 @@ class BaseObjectEntityTab(ttk.Frame):
             readonly = bool(field_meta.get("readonly", False))
             display_name = field_meta.get("display_name") or f.name
             # Prefer the declared dataclass type; if it's an Enum subclass, don't let metadata override it
-            declared_type = f.type
-            py_type = field_meta.get("type", declared_type)
+            declared_type = self._normalize_field_type(f.type)
+            py_type = self._normalize_field_type(field_meta.get("type", declared_type))
             if isinstance(declared_type, type) and issubclass(declared_type, Enum):
                 py_type = declared_type
+            lookup_name = field_meta.get("lookup")
             is_advanced = bool(field_meta.get("advanced", False))
             tip_text = field_meta.get("tip", "")
 
@@ -400,6 +645,10 @@ class BaseObjectEntityTab(ttk.Frame):
 
             # Read the current value from the target object
             value = getattr(target_obj, f.name)
+            if f.name == "row_id" and value is None and hasattr(target_obj, "display_key"):
+                # New LootMatrix rows do not have a persisted SQLite rowid yet.
+                # Show the temporary display key so the readonly field is not blank.
+                value = getattr(target_obj, "display_key")
 
             # Prepare a tkinter Variable to hold the editable value for this field.
             # We store (name, var, type) in self._entry_widgets so _on_save can read
@@ -407,7 +656,31 @@ class BaseObjectEntityTab(ttk.Frame):
             var: tk.Variable
 
             # Boolean fields get a Checkbutton bound to a BooleanVar
-            if isinstance(value, bool):
+            if lookup_name:
+                options, display = self._build_lookup_display(str(lookup_name), value)
+                var = tk.StringVar(value=display)
+                self._field_lookup_names[f.name] = str(lookup_name)
+                if readonly:
+                    entry_ro = ttk.Entry(inner, textvariable=var, width=30, state='readonly')
+                    entry_ro.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                    widget_for_tooltip = entry_ro
+                else:
+                    combo = ttk.Combobox(inner, state='readonly', values=options, textvariable=var, width=28)
+                    combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
+                    widget_for_tooltip = combo
+                    try:
+                        self._attach_combobox_wheel_passthrough(combo, canvas)
+                    except Exception:
+                        pass
+                try:
+                    self._attach_copy_context_menu(
+                        widget_for_tooltip,
+                        lambda v=var: str(v.get() or ""),
+                        field_name=f.name,
+                    )
+                except Exception:
+                    pass
+            elif isinstance(value, bool) or py_type in (bool, 'bool'):
                 var = tk.BooleanVar(value=value)
                 cb = ttk.Checkbutton(inner, variable=var)
                 if readonly:
@@ -1234,9 +1507,9 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Load the relevant object from the service
         try:
-            self.current_object = self.__load_relevant_object(parent_iid, obj_id)
+            loaded_object = self.__load_relevant_object(parent_iid, obj_id)
 
-            if self.current_object is None:
+            if loaded_object is None:
                 self._show_message("Could not load object")
                 return
 
@@ -1244,7 +1517,24 @@ class BaseObjectEntityTab(ttk.Frame):
             self._show_message(str(exc))
             return
 
+        if grandchild_iid is None and component_type != "object":
+            component = loaded_object.components.get(component_type)
+            if self._is_row_collection_component(component):
+                rows = self._get_component_rows(component)
+                if rows:
+                    first_row_iid = f"{iid}:{self._get_collection_row_key(component, rows[0])}"
+                    if self.tree.exists(first_row_iid):
+                        try:
+                            self.tree.item(iid, open=True)
+                            self.tree.selection_set(first_row_iid)
+                            self.tree.focus(first_row_iid)
+                            self.tree.see(first_row_iid)
+                        except Exception:
+                            pass
+                        return
+
         # Save current component type then build form (store grandchild for refresh)
+        self.current_object = loaded_object
         self.current_component_type = component_type
         self._last_grandchild_iid = grandchild_iid  # store for refresh
         self._build_form_for(component_type, grandchild_iid)
@@ -1259,6 +1549,8 @@ class BaseObjectEntityTab(ttk.Frame):
             return
 
         parent_iid = sel[0]
+        if ":" in parent_iid:
+            return
 
         # If there is a dummy child, remove it
         if self.tree.exists(f"{parent_iid}:dummy"):
@@ -1266,7 +1558,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # If there already are children, do not re-load
         if self.tree.get_children(parent_iid):
-            #TODO: Might want to refresh instead of ignoring
+            # Branch refreshes are driven explicitly after local edits.
             return
 
         # Parse the object ID from the iid
@@ -1278,18 +1570,7 @@ class BaseObjectEntityTab(ttk.Frame):
             log.error("Could not load object %s for expansion", object_id)
             return
 
-        component_list = obj.components
-
-        # Child list nodes (ie components from ComponentRegistry)
-        for key in component_list: # key is component name
-            child_iid = f"{parent_iid}:{key}"
-            self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
-
-            # Special case – ObjectSkills (has sub children)
-            if key == "ObjectSkill":
-                for skill in component_list[key].skills:
-                    skill_iid = f"{child_iid}:{skill.skill_id}"
-                    self.tree.insert(child_iid, tk.END, iid=skill_iid, text=f"Skill {skill.skill_id}")
+        self._populate_object_children(parent_iid, obj)
 
     # ------------------------------------------------------------------
     def _on_save(self, persist: bool = True) -> None:
@@ -1308,71 +1589,50 @@ class BaseObjectEntityTab(ttk.Frame):
         component_type = getattr(self, 'current_component_type', None)
         if not obj or not component_type:
             return
+        form_target = self._resolve_form_target(
+            obj,
+            component_type,
+            getattr(self, '_last_grandchild_iid', None),
+        )
+        if "message" in form_target:
+            if persist:
+                self._show_message(str(form_target["message"]))
+            return
 
-        # Resolve target object to edit
-
-        ####
-        # Special case: object entity itself
-        ####
-        if component_type == 'object':
-            target_obj = obj
-
-        ####
-        # Special case: ObjectSkill component with skill ID sub-selection
-        ####
-        elif component_type == 'ObjectSkill':
-            skill_id_str = getattr(self, '_last_grandchild_iid', None)
-            if not skill_id_str:
-                return
-            try:
-                skill_id = int(skill_id_str)
-            except ValueError:
-                return
-            skill_comp = obj.components.get('ObjectSkill')
-            if not skill_comp or not hasattr(skill_comp, 'skills'):
-                return
-            target_obj = next((row for row in skill_comp.skills if getattr(row, 'skill_id', None) == skill_id), None)
-            if target_obj is None:
-                return
-            # Track the original skill id so we can rename the left tree node if it changes
-            original_skill_id = getattr(target_obj, 'skill_id', None)
-
-            # Duplicate-prevention: read the prospective new id from the form and block if it already exists
-            try:
-                var_skill = next((v for (n, v, _t, ro) in getattr(self, '_entry_widgets', []) if n == 'skill_id' and not ro), None)
-            except Exception:
-                var_skill = None
-            if var_skill is not None:
-                try:
-                    new_proposed_id = int(var_skill.get())
-                except Exception:
-                    new_proposed_id = original_skill_id
-                if isinstance(new_proposed_id, int) and new_proposed_id != original_skill_id:
-                    if any((row is not target_obj) and getattr(row, 'skill_id', None) == new_proposed_id for row in getattr(skill_comp, 'skills', [])):
-                        try:
-                            messagebox.showerror("Duplicate Skill ID", f"Skill ID {new_proposed_id} already exists for this object.")
-                        except Exception:
-                            pass
-                        # Reset entry back to original and abort save (no changes applied)
-                        try:
-                            var_skill.set(str(original_skill_id))
-                        except Exception:
-                            pass
-                        return
-
-        ####
-        # General case: other components
-        ####
-        else:
-            target_obj = obj.components.get(component_type)
-            if target_obj is None:
-                if persist:
-                    self._show_message('Nothing to save')
-                return
+        target_obj = form_target["target"]
+        row_collection = form_target.get("collection")
+        original_row_key = form_target.get("original_key")
+        key_field = form_target.get("key_field")
 
         entry_widgets = getattr(self, '_entry_widgets', [])
         if not entry_widgets:
             return
+
+        if row_collection is not None and key_field:
+            try:
+                key_var = next(
+                    (v for (n, v, _t, ro) in entry_widgets if n == key_field and not ro),
+                    None,
+                )
+            except Exception:
+                key_var = None
+            if key_var is not None:
+                proposed_key = self._parse_collection_key(row_collection, key_var.get())
+                if proposed_key != original_row_key:
+                    existing_row = self._find_component_row(row_collection, proposed_key)
+                    if existing_row is not None and existing_row is not target_obj:
+                        try:
+                            messagebox.showerror(
+                                "Duplicate row key",
+                                f"{component_type} already contains a row with {key_field}={proposed_key}.",
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            key_var.set("" if original_row_key is None else str(original_row_key))
+                        except Exception:
+                            pass
+                        return
 
         # Apply widget values to target object, track if anything changed
         any_changed = False
@@ -1399,6 +1659,7 @@ class BaseObjectEntityTab(ttk.Frame):
                     setattr(target_obj, name, new_val)
                     any_changed = True
                 continue
+            lookup_name = getattr(self, '_field_lookup_names', {}).get(name)
             if raw == '':
                 # Empty string should be saved as empty string for string-typed fields.
                 # For non-string types, treat empty as None to represent SQL NULL.
@@ -1408,7 +1669,9 @@ class BaseObjectEntityTab(ttk.Frame):
                     new_val = None
             else:
                 try:
-                    if isinstance(typ, type) and issubclass(typ, Enum):
+                    if lookup_name:
+                        new_val = self._parse_lookup_value(raw)
+                    elif isinstance(typ, type) and issubclass(typ, Enum):
                         sel = str(raw)
                         # If blank (e.g., excluded original like UNKNOWN), skip updating this field
                         if sel == '':
@@ -1451,7 +1714,7 @@ class BaseObjectEntityTab(ttk.Frame):
                                     new_val = resolved.value
                                 except Exception:
                                     new_val = resolved
-                    elif typ in (int, 'int') or (hasattr(typ, '__origin__') and getattr(typ, '__origin__', None) is int):
+                    elif typ in (int, 'int'):
                         new_val = int(raw)
                     elif typ in (float, 'float'):
                         new_val = float(raw)
@@ -1501,10 +1764,10 @@ class BaseObjectEntityTab(ttk.Frame):
         # Mark dirty
         try:
             if any_changed:
-                # For skills, mark both skill row and ObjectSkill component dirty
-                if component_type == 'ObjectSkill':
+                # Row-collection edits mark both the row and its owning collection dirty.
+                if row_collection is not None:
                     target_obj.dirty = True
-                    obj.components['ObjectSkill'].dirty = True
+                    row_collection.dirty = True
                 else:
                     target_obj.dirty = True
         except Exception:
@@ -1514,7 +1777,7 @@ class BaseObjectEntityTab(ttk.Frame):
         if persist:
             # Persist changes through the service layer (to save to DB)
             try:
-                self._service.save_item(obj)
+                self._service.save(obj)
                 self._show_message('Saved successfully')
             except Exception as exc:  # pragma: no cover
                 self._show_message(f'Error saving: {exc}')
@@ -1529,7 +1792,7 @@ class BaseObjectEntityTab(ttk.Frame):
                 self._persist_root_deletions()
             except Exception as exc:
                 try:
-                    messagebox.showerror("Delete failed", f"Could not delete some items: {exc}")
+                    messagebox.showerror("Delete failed", f"Could not delete some objects: {exc}")
                 except Exception:
                     pass
             # Persist queued component deletions
@@ -1550,68 +1813,21 @@ class BaseObjectEntityTab(ttk.Frame):
         ### Ensure left tree is in sync with any changes
         #################################
 
-        # Keep left list in sync when a skill's skill_id is changed: update node iid/text and our refresh context
-        if component_type == 'ObjectSkill':
+        # Keep nested row nodes in sync if their identity key changed during editing.
+        if row_collection is not None:
             try:
-                new_skill_id = getattr(target_obj, 'skill_id', None)
-                if (
-                    'original_skill_id' in locals()
-                    and isinstance(original_skill_id, int)
-                    and isinstance(new_skill_id, int)
-                    and original_skill_id != new_skill_id
-                ):
-                    # Find the correct parent skill iid (handle both normal and alternate root iids)
-                    candidates = [self._make_root_iid(obj.object_id), self._make_root_iid_alt(obj.object_id)]
-                    old_iid = None
-                    parent_skill_iid = None
-                    for root in candidates:
-                        cand_parent = f"{root}:ObjectSkill"
-                        cand_old = f"{cand_parent}:{original_skill_id}"
-                        if self.tree.exists(cand_old):
-                            old_iid = cand_old
-                            parent_skill_iid = cand_parent
-                            break
-                    # Fallback: try current selection
-                    if old_iid is None:
-                        sel = self.tree.selection()
-                        if sel and self.tree.exists(sel[0]) and sel[0].count(":") == 2:
-                            old_iid = sel[0]
-                            parent_skill_iid = old_iid.rsplit(":", 1)[0]
-                    if old_iid is None or parent_skill_iid is None:
-                        # No visible node to rename; nothing to do
-                        raise RuntimeError("Skill node not found for rename")
-
-                    new_iid = f"{parent_skill_iid}:{new_skill_id}"
-                    if self.tree.exists(new_iid):
-                        # If target already exists, delete old and switch selection
-                        try:
-                            self.tree.delete(old_iid)
-                        except Exception:
-                            pass
-                        self.tree.item(new_iid, text=f"Skill {new_skill_id}")
-                        self.tree.selection_set(new_iid)
-                        self.tree.focus(new_iid)
-                    else:
-                        # Insert replacement at same index, then remove old
-                        try:
-                            idx = self.tree.index(old_iid)
-                        except Exception:
-                            idx = tk.END
-                        self.tree.insert(parent_skill_iid, idx, iid=new_iid, text=f"Skill {new_skill_id}")
-                        try:
-                            self.tree.delete(old_iid)
-                        except Exception:
-                            pass
-                        self.tree.selection_set(new_iid)
-                        self.tree.focus(new_iid)
-                    # Update context for future form refreshes
-                    self._last_grandchild_iid = str(new_skill_id)
+                self._sync_collection_row_node(
+                    obj.object_id,
+                    component_type,
+                    row_collection,
+                    original_row_key,
+                    target_obj,
+                )
             except Exception:
-                # Best-effort label update if anything above fails
                 try:
                     sel = self.tree.selection()
                     if sel:
-                        self.tree.item(sel[0], text=f"Skill {getattr(target_obj, 'skill_id', '')}")
+                        self.tree.item(sel[0], text=self._format_collection_row_text(row_collection, target_obj))
                 except Exception:
                     pass
 
@@ -1630,22 +1846,15 @@ class BaseObjectEntityTab(ttk.Frame):
         self._update_unsaved_indicator()
 
     # ------------------------------------------------------------------
-    def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Item: #TODO: add NPC type hint when implemented
-        """Load the relevant object (Item or NPC) based on the parent iid prefix and object ID."""
+    def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Any:
+        """Load the relevant object for this tab, preserving unsaved cached edits."""
 
         # Return cached object if already loaded (preserves unsaved edits)
         cached = self._object_cache.get(obj_id)
         if cached is not None:
             return cached
 
-        # Load from the appropriate service based on prefix
-        obj = None
-        if parent_iid.startswith("item-"):
-             obj = self._service.get_item(obj_id)
-        elif parent_iid.startswith("npc-"):
-            # Placeholder for future NPC support
-            # return self._service.get_npc(obj_id) # TODO
-            raise NotImplementedError("NPC support not yet implemented")
+        obj = self._service.get(obj_id)
 
         # Cache the loaded object if found
         if obj is not None:
@@ -1705,9 +1914,8 @@ class BaseObjectEntityTab(ttk.Frame):
             for comp in comps.values():
                 if getattr(comp, 'dirty', False):
                     return True
-                # Special-case nested rows like ObjectSkill
-                if hasattr(comp, 'skills'):
-                    for row in getattr(comp, 'skills', []) or []:
+                if self._is_row_collection_component(comp):
+                    for row in self._get_component_rows(comp):
                         if getattr(row, 'dirty', False):
                             return True
         except Exception:
@@ -1745,6 +1953,7 @@ class BaseObjectEntityTab(ttk.Frame):
         - _deleted_root_ids (set)
         - _deleted_components (list)
         - _deleted_skill_rows (list)
+        - _deleted_rows (list)
         If none exist or all are empty, the button is disabled; otherwise enabled.
         Safe no-op for tabs that don't define an undo button.
         """
@@ -1757,6 +1966,8 @@ class BaseObjectEntityTab(ttk.Frame):
                 has_local = True
             elif getattr(self, '_deleted_components', None):
                 has_local = bool(getattr(self, '_deleted_components'))
+            elif getattr(self, '_deleted_rows', None):
+                has_local = bool(getattr(self, '_deleted_rows'))
             elif getattr(self, '_deleted_skill_rows', None):
                 has_local = bool(getattr(self, '_deleted_skill_rows'))
         except Exception:
@@ -1796,8 +2007,7 @@ class BaseObjectEntityTab(ttk.Frame):
         for obj_id, obj in list(self._object_cache.items()):
             try:
                 if self._object_is_dirty(obj):
-                    # Service is provided by subclasses (e.g., ItemsTab)
-                    self._service.save_item(obj)
+                    self._service.save(obj)
                     # Remove from cache so it reloads fresh next time
                     self._object_cache.pop(obj_id, None)
                     saved_ids.append(obj_id)
@@ -1820,8 +2030,7 @@ class BaseObjectEntityTab(ttk.Frame):
         errors: list[str] = []
         for oid in list(deleted):
             try:
-                # Use service layer to delete fully (components + object + registry)
-                self._service.delete_item(int(oid))
+                self._service.delete_object(int(oid))
                 # Clean up local state
                 self._object_cache.pop(int(oid), None)
                 deleted.remove(oid)
@@ -1852,12 +2061,7 @@ class BaseObjectEntityTab(ttk.Frame):
                 ctype = item.get('type')
                 cid = item.get('component_id')
                 oid = item.get('object_id')
-                if ctype == 'ItemComponent' and cid is not None:
-                    self._service.delete_item_component(int(cid))
-                elif ctype == 'RenderComponent' and cid is not None:
-                    self._service.delete_render_component(int(cid))
-                elif ctype == 'ObjectSkill' and oid is not None:
-                    self._service.delete_skill_component(int(oid))
+                self._service.delete_component(str(ctype), component_id=cid, object_id=oid)
                 # Remove from queue after successful deletion
                 queue.remove(item)
             except Exception as exc:
@@ -2838,12 +3042,14 @@ class Application:
 
         # Services ------------------------------------------------------
         self.item_service = ItemService(self.db_path)
-        self.npc_service = NPCService(self.db_path)  # placeholder for future use
+        self.npc_service = NPCService(self.db_path)
 
         self._build_ui()
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
+        from npc_tab import NPCTab
+
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -2851,10 +3057,9 @@ class Application:
         self.items_tab = ItemsTab(notebook, self.item_service)
         notebook.add(self.items_tab, text="Items")
 
-        # NPC tab placeholder ------------------------------------------
-        npc_tab = ttk.Frame(notebook)
-        ttk.Label(npc_tab, text="NPC tools coming soon").pack(padx=10, pady=10)
-        notebook.add(npc_tab, text="NPCs")
+        # NPC tab --------------------------------------------------
+        self.npc_tab = NPCTab(notebook, self.npc_service)
+        notebook.add(self.npc_tab, text="NPCs")
 
         # Intercept window close to warn about unsaved changes
         try:
@@ -2867,7 +3072,7 @@ class Application:
         try:
             tabs_with_changes = []
             # Extend this list when more tabs inherit BaseObjectEntityTab
-            for tab in [getattr(self, 'items_tab', None)]:
+            for tab in [getattr(self, 'items_tab', None), getattr(self, 'npc_tab', None)]:
                 if tab is not None and hasattr(tab, 'has_unsaved_changes') and tab.has_unsaved_changes():
                     tabs_with_changes.append(tab)
 

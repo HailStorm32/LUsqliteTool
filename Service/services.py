@@ -1,18 +1,35 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Callable, Optional, Type, TypeVar
+from typing import Any, Callable, Optional, Type
 
 import logging
 from Domain.domains import (
+    CurrencyTableRow,
+    DestructibleComponent,
+    InventoryComponentRow,
     Item,
-    ObjectTypes,
     ItemComponent,
-    RenderComponent,
+    LootMatrixRow,
+    LootTableRow,
+    MinifigComponent,
+    MissionEmailRow,
+    MissionNPCComponentRow,
+    MissionRow,
+    MissionTaskRow,
+    MissionTextRow,
+    NPC,
     ObjectSkills,
     ObjectSkillRow,
+    ObjectTypes,
+    PhysicsComponent,
+    RenderComponent,
+    RowCollection,
+    ScriptComponent,
     INT_32_MAX,
+    VendorComponent,
 )
 from Repository.item import ItemRepository
+from Repository.npc import NPCRepository
 from Repository.exceptions import *
 
 log = logging.getLogger(__name__)
@@ -112,6 +129,29 @@ class BaseService:
             raise RuntimeError("Repository not configured for this service")
         self._repo.delete_skill_component(oid)
 
+    def delete_component(
+        self,
+        component_key: str,
+        component_id: int | None = None,
+        object_id: int | None = None,
+    ) -> None:
+        """Delete a component using the repository's generic API when available."""
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        if hasattr(self._repo, "delete_component"):
+            self._repo.delete_component(component_key, component_id=component_id, object_id=object_id)
+            return
+        if component_key == "ItemComponent" and component_id is not None:
+            self.delete_item_component(component_id)
+            return
+        if component_key == "RenderComponent" and component_id is not None:
+            self.delete_render_component(component_id)
+            return
+        if component_key == "ObjectSkill" and object_id is not None:
+            self.delete_skill_component(object_id)
+            return
+        raise ValueError(f"Unsupported component delete key: {component_key}")
+
     # ------------------------------
     # Component id helpers (exposed for UI orchestration)
     # ------------------------------
@@ -124,6 +164,25 @@ class BaseService:
         if self._repo is None:
             raise RuntimeError("Repository not configured for this service")
         return self._repo.generate_new_component_id(preferred_id, table)
+
+    def get_lookup_options(self, lookup_name: str) -> list[dict[str, Any]]:
+        """Return lookup rows used by UI dropdowns, when supported by the repository."""
+        if self._repo is None:
+            raise RuntimeError("Repository not configured for this service")
+        if hasattr(self._repo, "get_lookup_options"):
+            return self._repo.get_lookup_options(lookup_name)
+        return []
+
+    def _copy_fields(self, src_obj: Any, dst_obj: Any, *, exclude: set[str] | None = None) -> None:
+        """Best-effort attribute copier used by duplicate flows."""
+        exclude = set(exclude or set()) | {"dirty"}
+        for attr in vars(src_obj).keys():
+            if attr in exclude:
+                continue
+            try:
+                setattr(dst_obj, attr, getattr(src_obj, attr))
+            except Exception:
+                log.debug("Failed to copy attribute '%s' during duplicate; skipping", attr, exc_info=True)
 
 
 class ItemService(BaseService):
@@ -428,13 +487,984 @@ class ItemService(BaseService):
         return row
 
 
-# Placeholder for future NPCService so the GUI has an obvious insertion point.
 class NPCService(BaseService):
-    """Service layer for NPC related operations (not yet implemented)."""
+    """Service layer for NPC objects and linked NPC-owned tables."""
 
     def __init__(self, db_path: Path | str):
-        # No NPCRepository yet; wire up base without a repo for now.
-        # When an NPCRepository is added, call: super().__init__(db_path, NPCRepository)
-        super().__init__(db_path, repo_cls=None)
-        self.db_path = Path(db_path)
-        # Implementation will mirror ItemService when NPC repositories exist.
+        super().__init__(db_path, NPCRepository)
+
+    def get_npc(self, object_id: int) -> NPC:
+        return self.get(object_id)
+
+    def list_npcs(self, limit: int | None = None) -> list[dict[str, int | str]]:
+        try:
+            return self._repo.list_npcs(limit)
+        except Exception:
+            log.exception("Error listing NPC IDs")
+            return []
+
+    def save_npc(self, npc: NPC) -> None:
+        self.save(npc)
+
+    def _resolve_new_object_id(self, object_id: int | None) -> int:
+        if object_id is not None:
+            oid = self._require_positive_int(object_id, "Object ID")
+            try:
+                existing = self._repo.get(oid)
+                if existing is not None:
+                    raise ValueError(f"Object ID {oid} already exists")
+            except NotFoundError:
+                pass
+            return oid
+        return self._repo.generate_new_id()
+
+    def _ensure_row_collection(self, npc: NPC, key: str, *, key_field: str, label_prefix: str) -> RowCollection:
+        collection = npc.components.get(key)
+        if isinstance(collection, RowCollection):
+            return collection
+        collection = RowCollection(rows=[], key_field=key_field, label_prefix=label_prefix, dirty=True)
+        npc.components[key] = collection
+        return collection
+
+    def _ensure_component_row_collection(
+        self,
+        npc: NPC,
+        key: str,
+        *,
+        table: str,
+        key_field: str,
+        label_prefix: str,
+    ) -> RowCollection:
+        collection = self._ensure_row_collection(npc, key, key_field=key_field, label_prefix=label_prefix)
+        component_id = getattr(collection, "component_id", None)
+        if isinstance(component_id, int) and component_id > 0:
+            collection.loaded_keys = {component_id}
+            return collection
+
+        component_id = self._repo.generate_new_component_id(npc.object_id, table)
+        collection.component_id = component_id
+        collection.loaded_keys = {component_id}
+        collection.dirty = True
+        log.debug(
+            "Assigned row-collection component_id=%s key=%s object_id=%s",
+            component_id,
+            key,
+            npc.object_id,
+        )
+        return collection
+
+    def _get_or_create_primary_mission_id(self, npc: NPC) -> int:
+        collection = npc.components.get("MissionNPCComponent")
+        if isinstance(collection, RowCollection) and collection.rows:
+            return collection.rows[0].mission_id
+        return self.add_mission_bundle(npc).mission_id
+
+    def _collect_row_values(self, npc: NPC, component_keys: tuple[str, ...], attr: str) -> set[int]:
+        values: set[int] = set()
+        for component_key in component_keys:
+            collection = npc.components.get(component_key)
+            if not isinstance(collection, RowCollection):
+                continue
+            for row in collection.rows:
+                value = getattr(row, attr, None)
+                if isinstance(value, int):
+                    values.add(value)
+        return values
+
+    def _collect_component_values(self, npc: NPC, component_keys: tuple[str, ...], attr: str) -> set[int]:
+        values: set[int] = set()
+        for component_key in component_keys:
+            component = npc.components.get(component_key)
+            if component is None:
+                continue
+            value = getattr(component, attr, None)
+            if isinstance(value, int):
+                values.add(value)
+        return values
+
+    def _reserve_next_int(
+        self,
+        generator: Callable[[], int],
+        used_values: set[int],
+        *,
+        label: str,
+        object_id: int | None,
+    ) -> int:
+        candidate = int(generator())
+        while candidate in used_values:
+            candidate += 1
+        used_values.add(candidate)
+        log.debug("Reserved %s=%s object_id=%s", label, candidate, object_id)
+        return candidate
+
+    def _collect_loot_matrix_indices(self, npc: NPC) -> set[int]:
+        return self._collect_component_values(npc, ("VendorComponent", "DestructibleComponent"), "loot_matrix_index") | self._collect_row_values(
+            npc,
+            ("VendorLootMatrix", "DestructibleLootMatrix"),
+            "loot_matrix_index",
+        )
+
+    def _collect_currency_indices(self, npc: NPC) -> set[int]:
+        return self._collect_component_values(npc, ("DestructibleComponent",), "currency_index") | self._collect_row_values(
+            npc,
+            ("CurrencyTable",),
+            "currency_index",
+        )
+
+    def _collect_loot_table_indices(self, npc: NPC) -> set[int]:
+        return self._collect_row_values(
+            npc,
+            ("VendorLootMatrix", "VendorLootTable", "DestructibleLootMatrix", "DestructibleLootTable"),
+            "loot_table_index",
+        )
+
+    def _collect_loot_table_row_ids(self, npc: NPC) -> set[int]:
+        return self._collect_row_values(npc, ("VendorLootTable", "DestructibleLootTable"), "id")
+
+    def _collect_currency_row_ids(self, npc: NPC) -> set[int]:
+        return self._collect_row_values(npc, ("CurrencyTable",), "id")
+
+    def _collect_mission_ids(self, npc: NPC) -> set[int]:
+        return (
+            self._collect_row_values(npc, ("MissionNPCComponent",), "mission_id")
+            | self._collect_row_values(npc, ("Missions", "MissionTasks", "MissionText"), "id")
+            | self._collect_row_values(npc, ("MissionEmail",), "mission_id")
+        )
+
+    def _collect_task_uids(self, npc: NPC) -> set[int]:
+        return self._collect_row_values(npc, ("MissionTasks",), "uid")
+
+    def _collect_mission_email_ids(self, npc: NPC) -> set[int]:
+        return self._collect_row_values(npc, ("MissionEmail",), "id")
+
+    def create_default_vendor_npc(self, object_id: int | None = None) -> NPC:
+        new_id = self._resolve_new_object_id(object_id)
+        log.info("Creating default vendor NPC object_id=%s", new_id)
+        npc = NPC(id=new_id, type=ObjectTypes.NPC_2)
+        npc.dirty = True
+        npc.components["RenderComponent"] = RenderComponent(
+            id=self._repo.generate_new_component_id(new_id, "RenderComponent"),
+            dirty=True,
+        )
+        npc.components["MinifigComponent"] = MinifigComponent(
+            id=self._repo.generate_new_component_id(new_id, "MinifigComponent"),
+            dirty=True,
+        )
+        npc.components["PhysicsComponent"] = PhysicsComponent(
+            id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"),
+            dirty=True,
+        )
+        self._ensure_component_row_collection(
+            npc,
+            "InventoryComponent",
+            table="InventoryComponent",
+            key_field="itemid",
+            label_prefix="Item",
+        )
+        vendor = VendorComponent(
+            id=self._repo.generate_new_component_id(new_id, "VendorComponent"),
+            loot_matrix_index=self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_index,
+                self._collect_loot_matrix_indices(npc),
+                label="loot_matrix_index",
+                object_id=new_id,
+            ),
+            dirty=True,
+        )
+        npc.components["VendorComponent"] = vendor
+        npc.components["VendorLootMatrix"] = RowCollection(
+            rows=[],
+            key_field="ui_key",
+            label_prefix="Matrix",
+            loaded_keys={vendor.loot_matrix_index},
+            dirty=True,
+        )
+        npc.components["VendorLootTable"] = RowCollection(
+            rows=[],
+            key_field="id",
+            label_prefix="Loot",
+            loaded_keys=set(),
+            dirty=True,
+        )
+        self._repo.save(npc)
+        return self._repo.get(new_id) or npc
+
+    def create_default_mission_npc(self, object_id: int | None = None) -> NPC:
+        new_id = self._resolve_new_object_id(object_id)
+        log.info("Creating default mission NPC object_id=%s", new_id)
+        npc = NPC(id=new_id, type=ObjectTypes.NPC_2)
+        npc.dirty = True
+        npc.components["RenderComponent"] = RenderComponent(
+            id=self._repo.generate_new_component_id(new_id, "RenderComponent"),
+            dirty=True,
+        )
+        npc.components["MinifigComponent"] = MinifigComponent(
+            id=self._repo.generate_new_component_id(new_id, "MinifigComponent"),
+            dirty=True,
+        )
+        npc.components["PhysicsComponent"] = PhysicsComponent(
+            id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"),
+            dirty=True,
+        )
+        self._ensure_component_row_collection(
+            npc,
+            "InventoryComponent",
+            table="InventoryComponent",
+            key_field="itemid",
+            label_prefix="Item",
+        )
+        self.add_mission_bundle(npc, mark_existing_dirty=True)
+        self._repo.save(npc)
+        return self._repo.get(new_id) or npc
+
+    def add_render_component(self, npc: NPC) -> RenderComponent:
+        comp = npc.components.get("RenderComponent")
+        if isinstance(comp, RenderComponent):
+            return comp
+        comp = RenderComponent(id=self._repo.generate_new_component_id(npc.object_id, "RenderComponent"), dirty=True)
+        npc.components["RenderComponent"] = comp
+        return comp
+
+    def add_minifig_component(self, npc: NPC) -> MinifigComponent:
+        comp = npc.components.get("MinifigComponent")
+        if isinstance(comp, MinifigComponent):
+            return comp
+        comp = MinifigComponent(id=self._repo.generate_new_component_id(npc.object_id, "MinifigComponent"), dirty=True)
+        npc.components["MinifigComponent"] = comp
+        return comp
+
+    def add_physics_component(self, npc: NPC) -> PhysicsComponent:
+        comp = npc.components.get("PhysicsComponent")
+        if isinstance(comp, PhysicsComponent):
+            return comp
+        comp = PhysicsComponent(id=self._repo.generate_new_component_id(npc.object_id, "PhysicsComponent"), dirty=True)
+        npc.components["PhysicsComponent"] = comp
+        return comp
+
+    def ensure_inventory_component(self, npc: NPC) -> RowCollection:
+        return self._ensure_component_row_collection(
+            npc,
+            "InventoryComponent",
+            table="InventoryComponent",
+            key_field="itemid",
+            label_prefix="Item",
+        )
+
+    def add_vendor_component(self, npc: NPC) -> VendorComponent:
+        comp = npc.components.get("VendorComponent")
+        if isinstance(comp, VendorComponent):
+            return comp
+        comp = VendorComponent(
+            id=self._repo.generate_new_component_id(npc.object_id, "VendorComponent"),
+            loot_matrix_index=self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_index,
+                self._collect_loot_matrix_indices(npc),
+                label="loot_matrix_index",
+                object_id=npc.object_id,
+            ),
+            dirty=True,
+        )
+        npc.components["VendorComponent"] = comp
+        npc.components["VendorLootMatrix"] = RowCollection(
+            rows=[],
+            key_field="ui_key",
+            label_prefix="Matrix",
+            loaded_keys={comp.loot_matrix_index},
+            dirty=True,
+        )
+        npc.components["VendorLootTable"] = RowCollection(
+            rows=[],
+            key_field="id",
+            label_prefix="Loot",
+            loaded_keys=set(),
+            dirty=True,
+        )
+        return comp
+
+    def add_destructible_component(self, npc: NPC) -> DestructibleComponent:
+        comp = npc.components.get("DestructibleComponent")
+        if isinstance(comp, DestructibleComponent):
+            return comp
+        comp = DestructibleComponent(
+            id=self._repo.generate_new_component_id(npc.object_id, "DestructibleComponent"),
+            loot_matrix_index=self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_index,
+                self._collect_loot_matrix_indices(npc),
+                label="loot_matrix_index",
+                object_id=npc.object_id,
+            ),
+            currency_index=self._reserve_next_int(
+                self._repo.generate_new_currency_index,
+                self._collect_currency_indices(npc),
+                label="currency_index",
+                object_id=npc.object_id,
+            ),
+            dirty=True,
+        )
+        npc.components["DestructibleComponent"] = comp
+        npc.components["DestructibleLootMatrix"] = RowCollection(
+            rows=[],
+            key_field="ui_key",
+            label_prefix="Matrix",
+            loaded_keys={comp.loot_matrix_index},
+            dirty=True,
+        )
+        npc.components["DestructibleLootTable"] = RowCollection(
+            rows=[],
+            key_field="id",
+            label_prefix="Loot",
+            loaded_keys=set(),
+            dirty=True,
+        )
+        npc.components["CurrencyTable"] = RowCollection(
+            rows=[],
+            key_field="id",
+            label_prefix="Currency",
+            loaded_keys={comp.currency_index},
+            dirty=True,
+        )
+        return comp
+
+    def add_script_component(self, npc: NPC) -> ScriptComponent:
+        comp = npc.components.get("ScriptComponent")
+        if isinstance(comp, ScriptComponent):
+            return comp
+        comp = ScriptComponent(id=self._repo.generate_new_component_id(npc.object_id, "ScriptComponent"), dirty=True)
+        npc.components["ScriptComponent"] = comp
+        return comp
+
+    def add_inventory_row(self, npc: NPC) -> InventoryComponentRow:
+        collection = self.ensure_inventory_component(npc)
+        component_id = int(collection.component_id or npc.object_id)
+        used = {row.itemid for row in collection.rows}
+        candidate = INT_32_MAX
+        while candidate in used and candidate > 1:
+            candidate -= 1
+        row = InventoryComponentRow(id=component_id, itemid=candidate, count=1, equip=False)
+        collection.rows.append(row)
+        collection.dirty = True
+        return row
+
+    def add_mission_bundle(self, npc: NPC, *, mark_existing_dirty: bool = False) -> MissionNPCComponentRow:
+        mission_collection = self._ensure_component_row_collection(
+            npc,
+            "MissionNPCComponent",
+            table="MissionNPCComponent",
+            key_field="mission_id",
+            label_prefix="Mission",
+        )
+        missions = self._ensure_row_collection(npc, "Missions", key_field="id", label_prefix="Mission")
+        mission_text = self._ensure_row_collection(npc, "MissionText", key_field="id", label_prefix="Text")
+        mission_tasks = self._ensure_row_collection(npc, "MissionTasks", key_field="uid", label_prefix="Task")
+        mission_email = self._ensure_row_collection(npc, "MissionEmail", key_field="id", label_prefix="Email")
+
+        mission_id = self._reserve_next_int(
+            self._repo.generate_new_mission_id,
+            self._collect_mission_ids(npc),
+            label="mission_id",
+            object_id=npc.object_id,
+        )
+        component_id = int(mission_collection.component_id or npc.object_id)
+        mission_row = MissionNPCComponentRow(id=component_id, mission_id=mission_id)
+        mission_collection.rows.append(mission_row)
+        missions.rows.append(
+            MissionRow(
+                id=mission_id,
+                offer_object_id=npc.object_id,
+                target_object_id=npc.object_id,
+                is_mission=True,
+                localize=True,
+            )
+        )
+        mission_text.rows.append(MissionTextRow(id=mission_id))
+
+        mission_collection.dirty = True
+        missions.dirty = True
+        mission_text.dirty = True
+        if mark_existing_dirty:
+            mission_tasks.dirty = True
+            mission_email.dirty = True
+        return mission_row
+
+    def add_task_row(self, npc: NPC) -> MissionTaskRow:
+        mission_id = self._get_or_create_primary_mission_id(npc)
+        collection = self._ensure_row_collection(npc, "MissionTasks", key_field="uid", label_prefix="Task")
+        row = MissionTaskRow(
+            id=mission_id,
+            uid=self._reserve_next_int(
+                self._repo.generate_new_task_uid,
+                self._collect_task_uids(npc),
+                label="task_uid",
+                object_id=npc.object_id,
+            ),
+        )
+        collection.rows.append(row)
+        collection.dirty = True
+        return row
+
+    def add_email_row(self, npc: NPC) -> MissionEmailRow:
+        mission_id = self._get_or_create_primary_mission_id(npc)
+        collection = self._ensure_row_collection(npc, "MissionEmail", key_field="id", label_prefix="Email")
+        row = MissionEmailRow(
+            id=self._reserve_next_int(
+                self._repo.generate_new_mission_email_id,
+                self._collect_mission_email_ids(npc),
+                label="mission_email_id",
+                object_id=npc.object_id,
+            ),
+            message_type=0,
+            notification_group=0,
+            mission_id=mission_id,
+        )
+        collection.rows.append(row)
+        collection.dirty = True
+        return row
+
+    def _resolve_loot_collections(self, npc: NPC, family: str) -> tuple[RowCollection, RowCollection, int]:
+        if family == "vendor":
+            owner = self.add_vendor_component(npc)
+            matrix_collection = self._ensure_row_collection(npc, "VendorLootMatrix", key_field="ui_key", label_prefix="Matrix")
+            table_collection = self._ensure_row_collection(npc, "VendorLootTable", key_field="id", label_prefix="Loot")
+            loot_matrix_index = owner.loot_matrix_index
+        else:
+            owner = self.add_destructible_component(npc)
+            matrix_collection = self._ensure_row_collection(npc, "DestructibleLootMatrix", key_field="ui_key", label_prefix="Matrix")
+            table_collection = self._ensure_row_collection(npc, "DestructibleLootTable", key_field="id", label_prefix="Loot")
+            loot_matrix_index = owner.loot_matrix_index or 0
+        return matrix_collection, table_collection, loot_matrix_index
+
+    def _create_loot_table_row(self, npc: NPC, loot_table_index: int) -> LootTableRow:
+        return LootTableRow(
+            itemid=INT_32_MAX,
+            loot_table_index=loot_table_index,
+            id=self._reserve_next_int(
+                self._repo.generate_new_loot_table_row_id,
+                self._collect_loot_table_row_ids(npc),
+                label="loot_table_row_id",
+                object_id=npc.object_id,
+            ),
+        )
+
+    def add_loot_entry(self, npc: NPC, family: str) -> LootMatrixRow:
+        matrix_collection, _table_collection, loot_matrix_index = self._resolve_loot_collections(npc, family)
+        loot_table_index = self._reserve_next_int(
+            self._repo.generate_new_loot_table_index,
+            self._collect_loot_table_indices(npc),
+            label="loot_table_index",
+            object_id=npc.object_id,
+        )
+        matrix_row = LootMatrixRow(
+            loot_matrix_index=loot_matrix_index,
+            loot_table_index=loot_table_index,
+            rarity_table_index=1,
+            percent=1.0,
+            min_to_drop=0,
+            max_to_drop=1,
+        )
+        matrix_collection.rows.append(matrix_row)
+        matrix_collection.dirty = True
+        log.info(
+            "Added %s loot matrix row object_id=%s loot_matrix_index=%s loot_table_index=%s",
+            family,
+            npc.object_id,
+            loot_matrix_index,
+            loot_table_index,
+        )
+        return matrix_row
+
+    def add_loot_table_row(self, npc: NPC, family: str) -> tuple[LootMatrixRow, LootTableRow]:
+        matrix_collection, table_collection, _loot_matrix_index = self._resolve_loot_collections(npc, family)
+        matrix_rows = list(matrix_collection.rows or [])
+
+        # LootTable rows belong to an existing LootMatrix bucket. Reuse the first
+        # bucket when present so adding under the table does not create a new matrix.
+        if matrix_rows:
+            matrix_row = matrix_rows[0]
+            loot_row = self._create_loot_table_row(npc, matrix_row.loot_table_index)
+            table_collection.rows.append(loot_row)
+            table_collection.dirty = True
+            log.info(
+                "Added %s loot table row object_id=%s loot_table_index=%s loot_table_row_id=%s reused_matrix_key=%s",
+                family,
+                npc.object_id,
+                matrix_row.loot_table_index,
+                loot_row.id,
+                matrix_row.ui_key,
+            )
+            return matrix_row, loot_row
+
+        log.info("No existing %s loot matrix for object_id=%s; creating a new matrix bucket", family, npc.object_id)
+        matrix_row = self.add_loot_entry(npc, family)
+        loot_row = self._create_loot_table_row(npc, matrix_row.loot_table_index)
+        table_collection.rows.append(loot_row)
+        table_collection.dirty = True
+        log.info(
+            "Added %s loot table row object_id=%s loot_table_index=%s loot_table_row_id=%s after creating_matrix_key=%s",
+            family,
+            npc.object_id,
+            matrix_row.loot_table_index,
+            loot_row.id,
+            matrix_row.ui_key,
+        )
+        return matrix_row, loot_row
+
+    def add_currency_row(self, npc: NPC) -> CurrencyTableRow:
+        destructible = self.add_destructible_component(npc)
+        collection = self._ensure_row_collection(npc, "CurrencyTable", key_field="id", label_prefix="Currency")
+        row = CurrencyTableRow(
+            currency_index=destructible.currency_index or self._reserve_next_int(
+                self._repo.generate_new_currency_index,
+                self._collect_currency_indices(npc),
+                label="currency_index",
+                object_id=npc.object_id,
+            ),
+            npcminlevel=0,
+            minvalue=0,
+            maxvalue=0,
+            id=self._reserve_next_int(
+                self._repo.generate_new_currency_row_id,
+                self._collect_currency_row_ids(npc),
+                label="currency_row_id",
+                object_id=npc.object_id,
+            ),
+        )
+        collection.rows.append(row)
+        collection.dirty = True
+        return row
+
+    def remove_mission_bundle(self, npc: NPC, mission_id: int) -> None:
+        for key, attr in (
+            ("MissionNPCComponent", "mission_id"),
+            ("Missions", "id"),
+            ("MissionTasks", "id"),
+            ("MissionText", "id"),
+            ("MissionEmail", "mission_id"),
+        ):
+            collection = npc.components.get(key)
+            if not isinstance(collection, RowCollection):
+                continue
+            before = len(collection.rows)
+            collection.rows = [row for row in collection.rows if getattr(row, attr, None) != mission_id]
+            if len(collection.rows) != before:
+                collection.dirty = True
+
+    def remove_loot_entry(self, npc: NPC, family: str, loot_table_index: int) -> None:
+        if family == "vendor":
+            keys = ("VendorLootMatrix", "VendorLootTable")
+        else:
+            keys = ("DestructibleLootMatrix", "DestructibleLootTable")
+        for key in keys:
+            collection = npc.components.get(key)
+            if not isinstance(collection, RowCollection):
+                continue
+            before = len(collection.rows)
+            collection.rows = [row for row in collection.rows if getattr(row, "loot_table_index", None) != loot_table_index]
+            if len(collection.rows) != before:
+                collection.dirty = True
+
+    def remove_loot_table_row(self, npc: NPC, family: str, row_id: int) -> None:
+        key = "VendorLootTable" if family == "vendor" else "DestructibleLootTable"
+        collection = npc.components.get(key)
+        if not isinstance(collection, RowCollection):
+            return
+        before = len(collection.rows)
+        collection.rows = [row for row in collection.rows if getattr(row, "id", None) != row_id]
+        if len(collection.rows) != before:
+            collection.dirty = True
+
+    def duplicate_npc(self, source_object_id: int, target_object_id: int | None = None) -> NPC:
+        src_id = self._require_positive_int(source_object_id, "Source Object ID")
+        try:
+            src = self._repo.get(src_id)
+        except NotFoundError:
+            raise ValueError(f"Source NPC {src_id} does not exist")
+
+        new_id = self._resolve_new_object_id(target_object_id)
+        log.info("Duplicating NPC source_object_id=%s target_object_id=%s", src_id, new_id)
+        dup = NPC(id=new_id, type=getattr(src, "type", ObjectTypes.NPC_2), name=src.name)
+        self._copy_fields(src, dup, exclude={"object_id", "components", "type"})
+        dup.object_id = new_id
+        dup.type = getattr(src, "type", ObjectTypes.NPC_2)
+        dup.dirty = True
+
+        if src.components.get("RenderComponent") is not None:
+            comp = RenderComponent(id=self._repo.generate_new_component_id(new_id, "RenderComponent"))
+            self._copy_fields(src.components["RenderComponent"], comp, exclude={"id"})
+            comp.dirty = True
+            dup.components["RenderComponent"] = comp
+
+        if src.components.get("MinifigComponent") is not None:
+            comp = MinifigComponent(id=self._repo.generate_new_component_id(new_id, "MinifigComponent"))
+            self._copy_fields(src.components["MinifigComponent"], comp, exclude={"id"})
+            comp.dirty = True
+            dup.components["MinifigComponent"] = comp
+
+        if src.components.get("PhysicsComponent") is not None:
+            comp = PhysicsComponent(id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"))
+            self._copy_fields(src.components["PhysicsComponent"], comp, exclude={"id"})
+            comp.dirty = True
+            dup.components["PhysicsComponent"] = comp
+
+        if src.components.get("ScriptComponent") is not None:
+            comp = ScriptComponent(id=self._repo.generate_new_component_id(new_id, "ScriptComponent"))
+            self._copy_fields(src.components["ScriptComponent"], comp, exclude={"id"})
+            comp.dirty = True
+            dup.components["ScriptComponent"] = comp
+
+        inventory = src.components.get("InventoryComponent")
+        if isinstance(inventory, RowCollection):
+            inventory_component_id = self._repo.generate_new_component_id(new_id, "InventoryComponent")
+            dup.components["InventoryComponent"] = RowCollection(
+                rows=[
+                    InventoryComponentRow(id=inventory_component_id, itemid=row.itemid, count=row.count, equip=row.equip)
+                    for row in inventory.rows
+                ],
+                key_field="itemid",
+                label_prefix="Item",
+                component_id=inventory_component_id,
+                loaded_keys={inventory_component_id},
+                dirty=True,
+            )
+
+        self._duplicate_vendor_state(src, dup, new_id)
+        self._duplicate_destructible_state(src, dup, new_id)
+        self._duplicate_mission_state(src, dup, new_id)
+
+        self._repo.save(dup)
+        return self._repo.get(new_id) or dup
+
+    def _duplicate_vendor_state(self, src: NPC, dup: NPC, new_id: int) -> None:
+        src_vendor = src.components.get("VendorComponent")
+        if not isinstance(src_vendor, VendorComponent):
+            return
+        loot_matrix_indices = self._collect_loot_matrix_indices(dup)
+        vendor = VendorComponent(
+            id=self._repo.generate_new_component_id(new_id, "VendorComponent"),
+            loot_matrix_index=self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_index,
+                loot_matrix_indices,
+                label="loot_matrix_index",
+                object_id=new_id,
+            ),
+        )
+        self._copy_fields(src_vendor, vendor, exclude={"id", "loot_matrix_index"})
+        vendor.dirty = True
+        dup.components["VendorComponent"] = vendor
+
+        loot_index_map: dict[int, int] = {}
+        loot_table_indices = self._collect_loot_table_indices(dup)
+        src_matrix = src.components.get("VendorLootMatrix")
+        if isinstance(src_matrix, RowCollection):
+            for row in src_matrix.rows:
+                if row.loot_table_index not in loot_index_map:
+                    loot_index_map[row.loot_table_index] = self._reserve_next_int(
+                        self._repo.generate_new_loot_table_index,
+                        loot_table_indices,
+                        label="loot_table_index",
+                        object_id=new_id,
+                    )
+            dup.components["VendorLootMatrix"] = RowCollection(
+                rows=[
+                    LootMatrixRow(
+                        loot_matrix_index=vendor.loot_matrix_index,
+                        loot_table_index=loot_index_map[row.loot_table_index],
+                        rarity_table_index=row.rarity_table_index,
+                        percent=row.percent,
+                        min_to_drop=row.min_to_drop,
+                        max_to_drop=row.max_to_drop,
+                        id=row.id,
+                        flag_id=row.flag_id,
+                        gate_version=row.gate_version,
+                    )
+                    for row in src_matrix.rows
+                ],
+                key_field="ui_key",
+                label_prefix="Matrix",
+                loaded_keys={vendor.loot_matrix_index},
+                dirty=True,
+            )
+
+        src_table = src.components.get("VendorLootTable")
+        if isinstance(src_table, RowCollection):
+            for row in src_table.rows:
+                if row.loot_table_index not in loot_index_map:
+                    loot_index_map[row.loot_table_index] = self._reserve_next_int(
+                        self._repo.generate_new_loot_table_index,
+                        loot_table_indices,
+                        label="loot_table_index",
+                        object_id=new_id,
+                    )
+            loot_table_row_ids = self._collect_loot_table_row_ids(dup)
+            dup.components["VendorLootTable"] = RowCollection(
+                rows=[
+                    LootTableRow(
+                        itemid=row.itemid,
+                        loot_table_index=loot_index_map[row.loot_table_index],
+                        id=self._reserve_next_int(
+                            self._repo.generate_new_loot_table_row_id,
+                            loot_table_row_ids,
+                            label="loot_table_row_id",
+                            object_id=new_id,
+                        ),
+                        mission_drop=row.mission_drop,
+                        sort_priority=row.sort_priority,
+                    )
+                    for row in src_table.rows
+                ],
+                key_field="id",
+                label_prefix="Loot",
+                loaded_keys=set(loot_index_map.values()),
+                dirty=True,
+            )
+
+    def _duplicate_destructible_state(self, src: NPC, dup: NPC, new_id: int) -> None:
+        src_destructible = src.components.get("DestructibleComponent")
+        if not isinstance(src_destructible, DestructibleComponent):
+            return
+
+        loot_matrix_indices = self._collect_loot_matrix_indices(dup)
+        currency_indices = self._collect_currency_indices(dup)
+        destructible = DestructibleComponent(
+            id=self._repo.generate_new_component_id(new_id, "DestructibleComponent"),
+            loot_matrix_index=(
+                self._reserve_next_int(
+                    self._repo.generate_new_loot_matrix_index,
+                    loot_matrix_indices,
+                    label="loot_matrix_index",
+                    object_id=new_id,
+                )
+                if src_destructible.loot_matrix_index is not None else None
+            ),
+            currency_index=(
+                self._reserve_next_int(
+                    self._repo.generate_new_currency_index,
+                    currency_indices,
+                    label="currency_index",
+                    object_id=new_id,
+                )
+                if src_destructible.currency_index is not None else None
+            ),
+        )
+        self._copy_fields(
+            src_destructible,
+            destructible,
+            exclude={"id", "loot_matrix_index", "currency_index"},
+        )
+        destructible.dirty = True
+        dup.components["DestructibleComponent"] = destructible
+
+        loot_index_map: dict[int, int] = {}
+        loot_table_indices = self._collect_loot_table_indices(dup)
+        src_matrix = src.components.get("DestructibleLootMatrix")
+        if isinstance(src_matrix, RowCollection):
+            for row in src_matrix.rows:
+                if row.loot_table_index not in loot_index_map:
+                    loot_index_map[row.loot_table_index] = self._reserve_next_int(
+                        self._repo.generate_new_loot_table_index,
+                        loot_table_indices,
+                        label="loot_table_index",
+                        object_id=new_id,
+                    )
+            dup.components["DestructibleLootMatrix"] = RowCollection(
+                rows=[
+                    LootMatrixRow(
+                        loot_matrix_index=destructible.loot_matrix_index or 0,
+                        loot_table_index=loot_index_map[row.loot_table_index],
+                        rarity_table_index=row.rarity_table_index,
+                        percent=row.percent,
+                        min_to_drop=row.min_to_drop,
+                        max_to_drop=row.max_to_drop,
+                        id=row.id,
+                        flag_id=row.flag_id,
+                        gate_version=row.gate_version,
+                    )
+                    for row in src_matrix.rows
+                ],
+                key_field="ui_key",
+                label_prefix="Matrix",
+                loaded_keys={destructible.loot_matrix_index} if destructible.loot_matrix_index is not None else set(),
+                dirty=True,
+            )
+
+        src_table = src.components.get("DestructibleLootTable")
+        if isinstance(src_table, RowCollection):
+            for row in src_table.rows:
+                if row.loot_table_index not in loot_index_map:
+                    loot_index_map[row.loot_table_index] = self._reserve_next_int(
+                        self._repo.generate_new_loot_table_index,
+                        loot_table_indices,
+                        label="loot_table_index",
+                        object_id=new_id,
+                    )
+            loot_table_row_ids = self._collect_loot_table_row_ids(dup)
+            dup.components["DestructibleLootTable"] = RowCollection(
+                rows=[
+                    LootTableRow(
+                        itemid=row.itemid,
+                        loot_table_index=loot_index_map[row.loot_table_index],
+                        id=self._reserve_next_int(
+                            self._repo.generate_new_loot_table_row_id,
+                            loot_table_row_ids,
+                            label="loot_table_row_id",
+                            object_id=new_id,
+                        ),
+                        mission_drop=row.mission_drop,
+                        sort_priority=row.sort_priority,
+                    )
+                    for row in src_table.rows
+                ],
+                key_field="id",
+                label_prefix="Loot",
+                loaded_keys=set(loot_index_map.values()),
+                dirty=True,
+            )
+
+        src_currency = src.components.get("CurrencyTable")
+        if isinstance(src_currency, RowCollection) and destructible.currency_index is not None:
+            currency_row_ids = self._collect_currency_row_ids(dup)
+            dup.components["CurrencyTable"] = RowCollection(
+                rows=[
+                    CurrencyTableRow(
+                        currency_index=destructible.currency_index,
+                        npcminlevel=row.npcminlevel,
+                        minvalue=row.minvalue,
+                        maxvalue=row.maxvalue,
+                        id=self._reserve_next_int(
+                            self._repo.generate_new_currency_row_id,
+                            currency_row_ids,
+                            label="currency_row_id",
+                            object_id=new_id,
+                        ),
+                    )
+                    for row in src_currency.rows
+                ],
+                key_field="id",
+                label_prefix="Currency",
+                loaded_keys={destructible.currency_index},
+                dirty=True,
+            )
+
+    def _duplicate_mission_state(self, src: NPC, dup: NPC, new_id: int) -> None:
+        src_mission_component = src.components.get("MissionNPCComponent")
+        if not isinstance(src_mission_component, RowCollection):
+            return
+
+        mission_ids = self._collect_mission_ids(dup)
+        mission_id_map: dict[int, int] = {}
+        for row in src_mission_component.rows:
+            if row.mission_id not in mission_id_map:
+                mission_id_map[row.mission_id] = self._reserve_next_int(
+                    self._repo.generate_new_mission_id,
+                    mission_ids,
+                    label="mission_id",
+                    object_id=new_id,
+                )
+        if not mission_id_map:
+            return
+
+        mission_component_id = self._repo.generate_new_component_id(new_id, "MissionNPCComponent")
+        dup.components["MissionNPCComponent"] = RowCollection(
+            rows=[
+                MissionNPCComponentRow(
+                    id=mission_component_id,
+                    mission_id=mission_id_map[row.mission_id],
+                )
+                for row in src_mission_component.rows
+            ],
+            key_field="mission_id",
+            label_prefix="Mission",
+            component_id=mission_component_id,
+            loaded_keys={mission_component_id},
+            dirty=True,
+        )
+
+        src_missions = src.components.get("Missions")
+        if isinstance(src_missions, RowCollection):
+            mission_rows: list[MissionRow] = []
+            for row in src_missions.rows:
+                mission_row_id = mission_id_map.get(row.id)
+                if mission_row_id is None:
+                    mission_row_id = self._reserve_next_int(
+                        self._repo.generate_new_mission_id,
+                        mission_ids,
+                        label="mission_id",
+                        object_id=new_id,
+                    )
+                    mission_id_map[row.id] = mission_row_id
+                new_row = MissionRow(id=mission_row_id)
+                self._copy_fields(row, new_row, exclude={"id"})
+                if getattr(new_row, "offer_object_id", None) == src.object_id:
+                    new_row.offer_object_id = new_id
+                if getattr(new_row, "target_object_id", None) == src.object_id:
+                    new_row.target_object_id = new_id
+                mission_rows.append(new_row)
+            dup.components["Missions"] = RowCollection(
+                rows=mission_rows,
+                key_field="id",
+                label_prefix="Mission",
+                loaded_keys=set(mission_id_map.values()),
+                dirty=True,
+            )
+
+        src_tasks = src.components.get("MissionTasks")
+        if isinstance(src_tasks, RowCollection):
+            task_rows: list[MissionTaskRow] = []
+            task_uids = self._collect_task_uids(dup)
+            for row in src_tasks.rows:
+                new_row = MissionTaskRow(
+                    id=mission_id_map.get(row.id, row.id),
+                    uid=self._reserve_next_int(
+                        self._repo.generate_new_task_uid,
+                        task_uids,
+                        label="task_uid",
+                        object_id=new_id,
+                    ),
+                )
+                self._copy_fields(row, new_row, exclude={"id", "uid"})
+                task_rows.append(new_row)
+            dup.components["MissionTasks"] = RowCollection(
+                rows=task_rows,
+                key_field="uid",
+                label_prefix="Task",
+                loaded_keys=set(mission_id_map.values()),
+                dirty=True,
+            )
+
+        src_text = src.components.get("MissionText")
+        if isinstance(src_text, RowCollection):
+            mission_text_rows: list[MissionTextRow] = []
+            for row in src_text.rows:
+                new_row = MissionTextRow(id=mission_id_map.get(row.id, row.id))
+                self._copy_fields(row, new_row, exclude={"id"})
+                mission_text_rows.append(new_row)
+            dup.components["MissionText"] = RowCollection(
+                rows=mission_text_rows,
+                key_field="id",
+                label_prefix="Text",
+                loaded_keys=set(mission_id_map.values()),
+                dirty=True,
+            )
+
+        src_email = src.components.get("MissionEmail")
+        if isinstance(src_email, RowCollection):
+            email_rows: list[MissionEmailRow] = []
+            email_ids = self._collect_mission_email_ids(dup)
+            for row in src_email.rows:
+                new_row = MissionEmailRow(
+                    id=self._reserve_next_int(
+                        self._repo.generate_new_mission_email_id,
+                        email_ids,
+                        label="mission_email_id",
+                        object_id=new_id,
+                    ),
+                    mission_id=mission_id_map.get(row.mission_id, row.mission_id),
+                )
+                self._copy_fields(row, new_row, exclude={"id", "mission_id"})
+                email_rows.append(new_row)
+            dup.components["MissionEmail"] = RowCollection(
+                rows=email_rows,
+                key_field="id",
+                label_prefix="Email",
+                loaded_keys=set(mission_id_map.values()),
+                dirty=True,
+            )
