@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 from enum import Enum, IntEnum, StrEnum
@@ -247,20 +248,26 @@ class BaseObjectEntityTab(ttk.Frame):
     def _format_lookup_label(self, option: dict[str, Any]) -> str:
         ident = option.get("id", "")
         label = str(option.get("label") or "").strip()
-        return f"({ident}) {label}" if label else f"({ident})"
+        return f"{ident} | {label}" if label else str(ident)
 
     def _build_lookup_display(self, lookup_name: str, current_value: Any) -> tuple[list[str], str]:
         options = self._get_lookup_options(lookup_name)
-        values = [self._format_lookup_label(option) for option in options]
+        values = [""] + [self._format_lookup_label(option) for option in options]
         if current_value in (None, ""):
             return values, ""
         for option in options:
             if option.get("id") == current_value:
                 return values, self._format_lookup_label(option)
-        missing = f"({current_value}) [missing]"
+        missing = f"{current_value} | [missing]"
         if missing not in values:
             values.append(missing)
         return values, missing
+
+    def _get_lookup_widget_width(self, options: list[str], minimum: int = 42, maximum: int = 96) -> int:
+        if not options:
+            return minimum
+        longest = max(len(option) for option in options)
+        return max(minimum, min(maximum, longest + 2))
 
     def _parse_lookup_value(self, selection: Any) -> int | None:
         text = str(selection or "").strip()
@@ -270,11 +277,14 @@ class BaseObjectEntityTab(ttk.Frame):
             try:
                 return int(text[1:text.index(")")])
             except Exception:
-                return None
+                pass
+        match = re.match(r"^\s*(-?\d+)\b", text)
+        if match:
+            return int(match.group(1))
         try:
             return int(text)
         except Exception:
-            return None
+            raise ValueError(f"'{text}' is not a valid lookup id")
 
     def _sync_collection_row_node(self, obj_id: int, component_type: str, component: Any, original_key: Any, row: Any) -> None:
         """Keep collection-node identity stable when the edited row key changes."""
@@ -658,14 +668,15 @@ class BaseObjectEntityTab(ttk.Frame):
             # Boolean fields get a Checkbutton bound to a BooleanVar
             if lookup_name:
                 options, display = self._build_lookup_display(str(lookup_name), value)
+                widget_width = self._get_lookup_widget_width(options)
                 var = tk.StringVar(value=display)
                 self._field_lookup_names[f.name] = str(lookup_name)
                 if readonly:
-                    entry_ro = ttk.Entry(inner, textvariable=var, width=30, state='readonly')
+                    entry_ro = ttk.Entry(inner, textvariable=var, width=widget_width, state='readonly')
                     entry_ro.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                     widget_for_tooltip = entry_ro
                 else:
-                    combo = ttk.Combobox(inner, state='readonly', values=options, textvariable=var, width=28)
+                    combo = ttk.Combobox(inner, state='normal', values=options, textvariable=var, width=widget_width)
                     combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                     widget_for_tooltip = combo
                     try:

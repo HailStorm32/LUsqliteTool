@@ -1,8 +1,10 @@
 from __future__ import annotations
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Optional, Type
 
 import logging
+from metadata import component_field_metadata
 from Domain.domains import (
     CurrencyTableRow,
     DestructibleComponent,
@@ -637,19 +639,62 @@ class NPCService(BaseService):
     def _collect_mission_email_ids(self, npc: NPC) -> set[int]:
         return self._collect_row_values(npc, ("MissionEmail",), "id")
 
+    def _get_metadata_defaults(
+        self,
+        metadata_key: str,
+        *,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        defaults: dict[str, Any] = {}
+        for field_name, meta in component_field_metadata.get(metadata_key, {}).items():
+            if "default" not in meta:
+                continue
+            value = meta.get("default")
+            if isinstance(value, dict):
+                value = value.get(profile)
+            if value is None:
+                continue
+            defaults[field_name] = deepcopy(value)
+        return defaults
+
+    def _apply_metadata_defaults(self, target: Any, metadata_key: str, *, profile: str | None = None) -> None:
+        for field_name, value in self._get_metadata_defaults(metadata_key, profile=profile).items():
+            setattr(target, field_name, value)
+
+    def _build_component_with_metadata_defaults(
+        self,
+        component_cls: Type[Any],
+        metadata_key: str,
+        component_id: int,
+        *,
+        profile: str | None = None,
+    ) -> Any:
+        return component_cls(
+            id=component_id,
+            **self._get_metadata_defaults(metadata_key, profile=profile),
+        )
+
     def create_default_vendor_npc(self, object_id: int | None = None) -> NPC:
         new_id = self._resolve_new_object_id(object_id)
         log.info("Creating default vendor NPC object_id=%s", new_id)
         npc = NPC(id=new_id, type=ObjectTypes.NPC_2)
         npc.dirty = True
-        npc.components["RenderComponent"] = RenderComponent(
-            id=self._repo.generate_new_component_id(new_id, "RenderComponent"),
-            dirty=True,
+        self._apply_metadata_defaults(npc, "GameObject")
+        render = self._build_component_with_metadata_defaults(
+            RenderComponent,
+            "RenderComponent",
+            self._repo.generate_new_component_id(new_id, "RenderComponent"),
+            profile="vendor",
         )
-        npc.components["MinifigComponent"] = MinifigComponent(
-            id=self._repo.generate_new_component_id(new_id, "MinifigComponent"),
-            dirty=True,
+        render.dirty = True
+        npc.components["RenderComponent"] = render
+        minifig = self._build_component_with_metadata_defaults(
+            MinifigComponent,
+            "MinifigComponent",
+            self._repo.generate_new_component_id(new_id, "MinifigComponent"),
         )
+        minifig.dirty = True
+        npc.components["MinifigComponent"] = minifig
         npc.components["PhysicsComponent"] = PhysicsComponent(
             id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"),
             dirty=True,
@@ -694,14 +739,22 @@ class NPCService(BaseService):
         log.info("Creating default mission NPC object_id=%s", new_id)
         npc = NPC(id=new_id, type=ObjectTypes.NPC_2)
         npc.dirty = True
-        npc.components["RenderComponent"] = RenderComponent(
-            id=self._repo.generate_new_component_id(new_id, "RenderComponent"),
-            dirty=True,
+        self._apply_metadata_defaults(npc, "GameObject")
+        render = self._build_component_with_metadata_defaults(
+            RenderComponent,
+            "RenderComponent",
+            self._repo.generate_new_component_id(new_id, "RenderComponent"),
+            profile="mission",
         )
-        npc.components["MinifigComponent"] = MinifigComponent(
-            id=self._repo.generate_new_component_id(new_id, "MinifigComponent"),
-            dirty=True,
+        render.dirty = True
+        npc.components["RenderComponent"] = render
+        minifig = self._build_component_with_metadata_defaults(
+            MinifigComponent,
+            "MinifigComponent",
+            self._repo.generate_new_component_id(new_id, "MinifigComponent"),
         )
+        minifig.dirty = True
+        npc.components["MinifigComponent"] = minifig
         npc.components["PhysicsComponent"] = PhysicsComponent(
             id=self._repo.generate_new_component_id(new_id, "PhysicsComponent"),
             dirty=True,
@@ -721,7 +774,19 @@ class NPCService(BaseService):
         comp = npc.components.get("RenderComponent")
         if isinstance(comp, RenderComponent):
             return comp
-        comp = RenderComponent(id=self._repo.generate_new_component_id(npc.object_id, "RenderComponent"), dirty=True)
+        comp = self._build_component_with_metadata_defaults(
+            RenderComponent,
+            "RenderComponent",
+            self._repo.generate_new_component_id(npc.object_id, "RenderComponent"),
+            profile=(
+                "vendor"
+                if isinstance(npc.components.get("VendorComponent"), VendorComponent)
+                else "mission"
+                if isinstance(npc.components.get("MissionNPCComponent"), RowCollection)
+                else None
+            ),
+        )
+        comp.dirty = True
         npc.components["RenderComponent"] = comp
         return comp
 
@@ -729,7 +794,12 @@ class NPCService(BaseService):
         comp = npc.components.get("MinifigComponent")
         if isinstance(comp, MinifigComponent):
             return comp
-        comp = MinifigComponent(id=self._repo.generate_new_component_id(npc.object_id, "MinifigComponent"), dirty=True)
+        comp = self._build_component_with_metadata_defaults(
+            MinifigComponent,
+            "MinifigComponent",
+            self._repo.generate_new_component_id(npc.object_id, "MinifigComponent"),
+        )
+        comp.dirty = True
         npc.components["MinifigComponent"] = comp
         return comp
 
