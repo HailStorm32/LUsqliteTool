@@ -66,7 +66,7 @@ component_field_metadata = {
 
     # ---------------------------------------------------------------
     # RenderComponent visual representation metadata
-    # ---------------------------------------------------------------
+    # ---------------------------------------------------------------2097200
     "RenderComponent": {
         # Core identity
         "id":                          { "tip": "Primary key / component id",            "display_name": "",    "type": int,        "min": 1,        "max": INT_32_MAX,    "readonly": True,   "advanced": False , "default": None },
@@ -75,16 +75,16 @@ component_field_metadata = {
         "render_asset":                { "tip": "Path or identifier of render asset",    "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False, "default": { "vendor": r"animations\minifig\mf_vendor.kfm", "mission": r"animations\minifig\mf_mission-givers.kfm" } },
         "icon_asset":                  { "tip": "Icon asset reference",                  "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False , "default": None },
         "icon_id":                     { "tip": "Numeric icon id",                       "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "icons", "default": None },
-        "shader_id":                   { "tip": "Shader identifier",                     "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
+        "shader_id":                   { "tip": "Shader identifier",                     "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": 14 },
 
         # Effects (optional int slots)
-        "effect1":                     { "tip": "Effect slot 1 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
+        "effect1":                     { "tip": "Effect slot 1 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": 93 },
         "effect2":                     { "tip": "Effect slot 2 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
         "effect3":                     { "tip": "Effect slot 3 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
         "effect4":                     { "tip": "Effect slot 4 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
         "effect5":                     { "tip": "Effect slot 5 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
         "effect6":                     { "tip": "Effect slot 6 id",                      "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": None },
-        "animation_group_ids":         { "tip": "Serialized animation group ids",        "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": True  , "default": None },
+        "animation_group_ids":         { "tip": "Serialized animation group ids",        "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": True  , "default": 23 },
 
         # Booleans controlling rendering behavior
         "fade":                        { "tip": "Enable fade",                           "display_name": "",    "type": bool,       "min": None,     "max": None,          "readonly": False,  "advanced": False , "default": None },
@@ -107,7 +107,7 @@ component_field_metadata = {
 
         # Billboard / UI
         "billboard_height":            { "tip": "Billboard height",                      "display_name": "",    "type": float,      "min": 0.0,      "max": FLOAT_32_MAX,  "readonly": False,  "advanced": True  , "default": None },
-        "chat_bubble_offset":          { "tip": "Chat bubble vertical offset",           "display_name": "",    "type": float,      "min": 0.0,      "max": FLOAT_32_MAX,  "readonly": False,  "advanced": True  , "default": None },
+        "chat_bubble_offset":          { "tip": "Chat bubble vertical offset",           "display_name": "",    "type": float,      "min": 0.0,      "max": FLOAT_32_MAX,  "readonly": False,  "advanced": True  , "default": 4.5 },
         "static_billboard":            { "tip": "Static billboard",                      "display_name": "",    "type": bool,       "min": None,     "max": None,          "readonly": False,  "advanced": True  , "default": None },
 
         # Folders / misc
