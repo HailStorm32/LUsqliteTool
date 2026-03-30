@@ -214,6 +214,7 @@ component_field_metadata = {
         "skill_id":               { "tip": "Skill behavior id",                       "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False , "default": None },
         "cast_on_type":           { "tip": "Cast on type flag",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True  , "default": None },
         "ai_combat_weight":       { "tip": "AI combat weight / priority",             "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True  , "default": None },
+        "dirty":                  { "tip": "Internal dirty flag (not editable)",      "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True  , "default": None },
     },
 
     # ---------------------------------------------------------------
@@ -221,6 +222,10 @@ component_field_metadata = {
     # ---------------------------------------------------------------
     "InventoryComponentRow": {
         "id":                    { "tip": "Parent component id",                      "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": True,  "default": None },
+        "itemid":                { "tip": "Item LOT id",                              "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "count":                 { "tip": "Item count",                               "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },
+        "equip":                 { "tip": "Equipped by default",                      "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": False },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",       "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
     },
 
     # ---------------------------------------------------------------
@@ -228,6 +233,11 @@ component_field_metadata = {
     # ---------------------------------------------------------------
     "MissionNPCComponentRow": {
         "id":                    { "tip": "Parent component id",                      "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": True,  "default": None },
+        "mission_id":            { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "offers_mission":        { "tip": "NPC can offer mission",                    "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": False, "default": True },
+        "accepts_mission":       { "tip": "NPC can accept turn-in",                   "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": False, "default": True },
+        "gate_version":          { "tip": "Version gate string",                      "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",       "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
     },
 
     # ---------------------------------------------------------------
@@ -235,29 +245,150 @@ component_field_metadata = {
     # ---------------------------------------------------------------
     "LootMatrixRow": {
         "row_id":                { "tip": "SQLite row id",                            "display_name": "", "type": int,   "min": None, "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
+        "loot_matrix_index":     { "tip": "Loot matrix index",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 0 },
+        "loot_table_index":      { "tip": "Loot table index",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 0 },
+        "rarity_table_index":    { "tip": "Rarity table index",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "percent":               { "tip": "Drop chance percentage",                    "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": False, "default": 1.0 },
+        "min_to_drop":           { "tip": "Minimum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 0 },
+        "max_to_drop":           { "tip": "Maximum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },
+        "id":                    { "tip": "Associated object id",                      "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "flag_id":               { "tip": "Required flag id",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "gate_version":          { "tip": "Version gate string",                      "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",       "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
     },
 
     # ---------------------------------------------------------------
     # Mission row metadata
     # ---------------------------------------------------------------
     "MissionRow": {
+        "id":                    { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
+        "defined_type":          { "tip": "Defined mission type",                     "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "defined_subtype":       { "tip": "Defined mission subtype",                  "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "ui_sort_order":         { "tip": "UI sort order",                            "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "offer_object_id":       { "tip": "Mission offer object id",                  "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "target_object_id":      { "tip": "Mission target object id",                 "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "reward_currency":       { "tip": "Reward currency amount",                   "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "lego_score":            { "tip": "LEGO score reward",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "reward_reputation":     { "tip": "Reputation reward",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "is_choice_reward":      { "tip": "Choose one reward item",                   "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": False },
+        "reward_item1":          { "tip": "Primary reward item LOT",                  "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": False, "default": -1 },
+        "reward_item1_count":    { "tip": "Primary reward item count",                "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },
+        "reward_item2":          { "tip": "Secondary reward item LOT",                "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": False, "default": -1 },
+        "reward_item2_count":    { "tip": "Secondary reward item count",              "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },
+        "reward_item3":          { "tip": "Tertiary reward item LOT",                 "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_item3_count":    { "tip": "Tertiary reward item count",               "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "reward_item4":          { "tip": "Quaternary reward item LOT",               "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_item4_count":    { "tip": "Quaternary reward item count",             "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "reward_emote":          { "tip": "Primary reward emote id",                  "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_emote2":         { "tip": "Secondary reward emote id",                "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_emote3":         { "tip": "Tertiary reward emote id",                 "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_emote4":         { "tip": "Quaternary reward emote id",               "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_max_imagination": { "tip": "Max imagination reward",                  "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "reward_max_health":     { "tip": "Max health reward",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "reward_max_inventory":  { "tip": "Max inventory reward",                     "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "reward_max_model":      { "tip": "Max model reward",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "reward_max_widget":     { "tip": "Max widget reward",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "reward_max_wallet":     { "tip": "Max wallet reward",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "repeatable":            { "tip": "Mission is repeatable",                    "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": False, "default": False },
+        "reward_currency_repeatable": { "tip": "Repeatable currency reward",          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "reward_item1_repeatable": { "tip": "Repeatable reward item 1 LOT",           "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_item1_repeat_count": { "tip": "Repeatable reward item 1 count",       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "reward_item2_repeatable": { "tip": "Repeatable reward item 2 LOT",           "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_item2_repeat_count": { "tip": "Repeatable reward item 2 count",       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "reward_item3_repeatable": { "tip": "Repeatable reward item 3 LOT",           "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_item3_repeat_count": { "tip": "Repeatable reward item 3 count",       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "reward_item4_repeatable": { "tip": "Repeatable reward item 4 LOT",           "display_name": "", "type": int,   "min": -1,   "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": -1 },
+        "reward_item4_repeat_count": { "tip": "Repeatable reward item 4 count",       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "time_limit":            { "tip": "Mission time limit",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "is_mission":            { "tip": "Is mission (vs achievement)",              "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
         "mission_icon_id":       { "tip": "Mission icon id",                          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "prereq_mission_id":     { "tip": "Prerequisite mission ids",                  "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
+        "in_motd":               { "tip": "Show in MOTD",                              "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": False },
+        "cooldown_time":         { "tip": "Cooldown time in seconds",                  "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "is_random":             { "tip": "Randomized mission",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": False },
+        "random_pool":           { "tip": "Random mission pool",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "ui_prereq_id":          { "tip": "UI prerequisite mission id",                "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "gate_version":          { "tip": "Version gate string",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "hud_states":            { "tip": "HUD state overrides",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "reward_bank_inventory": { "tip": "Bank inventory reward",                     "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
     },
 
     # ---------------------------------------------------------------
     # Mission task row metadata
     # ---------------------------------------------------------------
     "MissionTaskRow": {
+        "id":                    { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
+        "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "task_type":             { "tip": "Task type enum",                            "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "target":                { "tip": "Task target id",                            "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "target_group":          { "tip": "Task target group",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "target_value":          { "tip": "Task target value",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "task_param1":           { "tip": "Task parameter 1",                          "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "large_task_icon":       { "tip": "Large task icon asset",                     "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "icon_id":               { "tip": "Task icon id",                             "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "uid":                   { "tip": "Task unique id",                            "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "large_task_icon_id":    { "tip": "Large task icon id",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
+        "gate_version":          { "tip": "Version gate string",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
     },
 
     # ---------------------------------------------------------------
     # Mission text row metadata
     # ---------------------------------------------------------------
     "MissionTextRow": {
+        "id":                    { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
+        "story_icon":            { "tip": "Story icon asset",                          "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "mission_icon":          { "tip": "Mission icon asset",                        "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "offer_npc_icon":        { "tip": "Offer NPC icon asset",                      "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "icon_id":               { "tip": "Mission text icon id",                     "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "state_1_anim":          { "tip": "State 1 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "state_2_anim":          { "tip": "State 2 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "state_3_anim":          { "tip": "State 3 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "state_4_anim":          { "tip": "State 4 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "state_3_turnin_anim":   { "tip": "State 3 turn-in animation",                 "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "state_4_turnin_anim":   { "tip": "State 4 turn-in animation",                 "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "onclick_anim":          { "tip": "On-click animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "cinematic_accepted":    { "tip": "Accepted cinematic",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "cinematic_accepted_leadin": { "tip": "Accepted cinematic lead-in",             "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "cinematic_completed":   { "tip": "Completed cinematic",                        "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "cinematic_completed_leadin": { "tip": "Completed cinematic lead-in",           "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "cinematic_repeatable":  { "tip": "Repeatable cinematic",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "cinematic_repeatable_leadin": { "tip": "Repeatable cinematic lead-in",         "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "cinematic_repeatable_completed": { "tip": "Repeatable completed cinematic",    "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "cinematic_repeatable_completed_leadin": { "tip": "Repeatable completed lead-in", "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_interact": { "tip": "Interact audio event GUID",             "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_offer_accept": { "tip": "Offer accept audio event GUID",     "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_offer_deny": { "tip": "Offer deny audio event GUID",         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_completed": { "tip": "Completed audio event GUID",           "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_turn_in": { "tip": "Turn-in audio event GUID",               "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_failed":  { "tip": "Failed audio event GUID",                "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_event_guid_progress": { "tip": "Progress audio event GUID",             "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_music_cue_offer_accept": { "tip": "Offer accept music cue",             "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "audio_music_cue_turn_in": { "tip": "Turn-in music cue",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "turn_in_icon_id":       { "tip": "Turn-in icon id",                          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
+        "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "gate_version":          { "tip": "Version gate string",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
+    },
+
+    # ---------------------------------------------------------------
+    # Mission email row metadata
+    # ---------------------------------------------------------------
+    "MissionEmailRow": {
+        "id":                    { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
+        "message_type":          { "tip": "Mission email message type",               "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "notification_group":    { "tip": "Mission email notification group",         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "mission_id":            { "tip": "Linked mission id",                        "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "attachment_lot":        { "tip": "Attachment item LOT",                      "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
+        "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
+        "gate_version":          { "tip": "Version gate string",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
+        "dirty":                 { "tip": "Internal dirty flag (not editable)",        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
     },
 }
 

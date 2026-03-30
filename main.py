@@ -86,11 +86,6 @@ if __name__ == "__main__":
 
 """
 TODO:
-- NPC functionality
-   - domains
-   - repository
-   - service
-   - GUI
 - Pull ColorType values from DB (BrickColors table) instead of hardcoding
 
 
