@@ -11,8 +11,10 @@ from Domain.domains import (
     InventoryComponentRow,
     Item,
     ItemComponent,
+    LootMatrixIndexRow,
     LootMatrixRow,
     LootTableRow,
+    LootTableIndexRow,
     MinifigComponent,
     MissionEmailRow,
     MissionNPCComponentRow,
@@ -649,10 +651,13 @@ class NPCService(BaseService):
         log.debug("Reserved %s=%s object_id=%s", label, candidate, object_id)
         return candidate
 
+    def _has_linked_index(self, value: Any) -> bool:
+        return isinstance(value, int) and value > 0
+
     def _collect_loot_matrix_indices(self, npc: NPC) -> set[int]:
         return self._collect_component_values(npc, ("VendorComponent", "DestructibleComponent"), "loot_matrix_index") | self._collect_row_values(
             npc,
-            ("VendorLootMatrix", "DestructibleLootMatrix"),
+            ("VendorLootMatrixIndex", "DestructibleLootMatrixIndex", "VendorLootMatrix", "DestructibleLootMatrix"),
             "loot_matrix_index",
         )
 
@@ -666,7 +671,14 @@ class NPCService(BaseService):
     def _collect_loot_table_indices(self, npc: NPC) -> set[int]:
         return self._collect_row_values(
             npc,
-            ("VendorLootMatrix", "VendorLootTable", "DestructibleLootMatrix", "DestructibleLootTable"),
+            (
+                "VendorLootTableIndex",
+                "DestructibleLootTableIndex",
+                "VendorLootMatrix",
+                "VendorLootTable",
+                "DestructibleLootMatrix",
+                "DestructibleLootTable",
+            ),
             "loot_table_index",
         )
 
@@ -688,6 +700,71 @@ class NPCService(BaseService):
 
     def _collect_mission_email_ids(self, npc: NPC) -> set[int]:
         return self._collect_row_values(npc, ("MissionEmail",), "id")
+
+    def _ensure_loot_matrix_index_collection(self, npc: NPC, family: str) -> RowCollection:
+        key = "VendorLootMatrixIndex" if family == "vendor" else "DestructibleLootMatrixIndex"
+        return self._ensure_row_collection(npc, key, key_field="loot_matrix_index", label_prefix="LootMatrixIndex")
+
+    def _ensure_loot_table_index_collection(self, npc: NPC, family: str) -> RowCollection:
+        key = "VendorLootTableIndex" if family == "vendor" else "DestructibleLootTableIndex"
+        return self._ensure_row_collection(npc, key, key_field="loot_table_index", label_prefix="LootTableIndex")
+
+    def _ensure_loot_matrix_index_row(self, npc: NPC, family: str, loot_matrix_index: int) -> LootMatrixIndexRow:
+        collection = self._ensure_loot_matrix_index_collection(npc, family)
+        existing = next(
+            (row for row in collection.rows if getattr(row, "loot_matrix_index", None) == loot_matrix_index),
+            None,
+        )
+        if isinstance(existing, LootMatrixIndexRow):
+            if collection.rows != [existing]:
+                collection.dirty = True
+            collection.rows = [existing]
+            return existing
+        row = LootMatrixIndexRow(loot_matrix_index=loot_matrix_index, in_npc_editor=True)
+        collection.rows = [row]
+        collection.dirty = True
+        return row
+
+    def _ensure_loot_table_index_row(self, npc: NPC, family: str, loot_table_index: int) -> LootTableIndexRow:
+        collection = self._ensure_loot_table_index_collection(npc, family)
+        existing = next(
+            (row for row in collection.rows if getattr(row, "loot_table_index", None) == loot_table_index),
+            None,
+        )
+        if isinstance(existing, LootTableIndexRow):
+            return existing
+        row = LootTableIndexRow(loot_table_index=loot_table_index)
+        collection.rows.append(row)
+        collection.dirty = True
+        return row
+
+    def _ensure_vendor_loot_matrix_index(self, npc: NPC) -> int:
+        vendor = self.add_vendor_component(npc)
+        if not self._has_linked_index(getattr(vendor, "loot_matrix_index", None)):
+            vendor.loot_matrix_index = self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_index,
+                self._collect_loot_matrix_indices(npc),
+                label="loot_matrix_index",
+                object_id=npc.object_id,
+            )
+            vendor.dirty = True
+        self._ensure_loot_matrix_index_row(npc, "vendor", int(vendor.loot_matrix_index))
+        return int(vendor.loot_matrix_index)
+
+    def _ensure_destructible_loot_matrix_index(self, npc: NPC) -> int:
+        component = npc.components.get("DestructibleComponent")
+        if not isinstance(component, DestructibleComponent):
+            component = self.add_destructible_component(npc)
+        if component.loot_matrix_index is None:
+            component.loot_matrix_index = self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_index,
+                self._collect_loot_matrix_indices(npc),
+                label="loot_matrix_index",
+                object_id=npc.object_id,
+            )
+            component.dirty = True
+        self._ensure_loot_matrix_index_row(npc, "destructible", int(component.loot_matrix_index))
+        return int(component.loot_matrix_index)
 
     def create_default_vendor_npc(self, object_id: int | None = None) -> NPC:
         new_id = self._resolve_new_object_id(object_id)
@@ -735,26 +812,27 @@ class NPCService(BaseService):
             VendorComponent,
             "VendorComponent",
             id=self._repo.generate_new_component_id(new_id, "VendorComponent"),
-            loot_matrix_index=self._reserve_next_int(
-                self._repo.generate_new_loot_matrix_index,
-                self._collect_loot_matrix_indices(npc),
-                label="loot_matrix_index",
-                object_id=new_id,
-            ),
         )
         vendor.dirty = True
         npc.components["VendorComponent"] = vendor
         npc.components["VendorLootMatrix"] = RowCollection(
             rows=[],
             key_field="ui_key",
-            label_prefix="Matrix",
-            loaded_keys={vendor.loot_matrix_index},
+            label_prefix="LootMatrix",
+            loaded_keys={vendor.loot_matrix_index} if self._has_linked_index(vendor.loot_matrix_index) else set(),
+            dirty=True,
+        )
+        npc.components["VendorLootTableIndex"] = RowCollection(
+            rows=[],
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=set(),
             dirty=True,
         )
         npc.components["VendorLootTable"] = RowCollection(
             rows=[],
             key_field="id",
-            label_prefix="Loot",
+            label_prefix="LootTable",
             loaded_keys=set(),
             dirty=True,
         )
@@ -870,26 +948,27 @@ class NPCService(BaseService):
             VendorComponent,
             "VendorComponent",
             id=self._repo.generate_new_component_id(npc.object_id, "VendorComponent"),
-            loot_matrix_index=self._reserve_next_int(
-                self._repo.generate_new_loot_matrix_index,
-                self._collect_loot_matrix_indices(npc),
-                label="loot_matrix_index",
-                object_id=npc.object_id,
-            ),
         )
         comp.dirty = True
         npc.components["VendorComponent"] = comp
         npc.components["VendorLootMatrix"] = RowCollection(
             rows=[],
             key_field="ui_key",
-            label_prefix="Matrix",
-            loaded_keys={comp.loot_matrix_index},
+            label_prefix="LootMatrix",
+            loaded_keys={comp.loot_matrix_index} if self._has_linked_index(comp.loot_matrix_index) else set(),
+            dirty=True,
+        )
+        npc.components["VendorLootTableIndex"] = RowCollection(
+            rows=[],
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=set(),
             dirty=True,
         )
         npc.components["VendorLootTable"] = RowCollection(
             rows=[],
             key_field="id",
-            label_prefix="Loot",
+            label_prefix="LootTable",
             loaded_keys=set(),
             dirty=True,
         )
@@ -918,24 +997,32 @@ class NPCService(BaseService):
         )
         comp.dirty = True
         npc.components["DestructibleComponent"] = comp
+        self._ensure_loot_matrix_index_row(npc, "destructible", int(comp.loot_matrix_index or 0))
         npc.components["DestructibleLootMatrix"] = RowCollection(
             rows=[],
             key_field="ui_key",
-            label_prefix="Matrix",
+            label_prefix="LootMatrix",
             loaded_keys={comp.loot_matrix_index},
+            dirty=True,
+        )
+        npc.components["DestructibleLootTableIndex"] = RowCollection(
+            rows=[],
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=set(),
             dirty=True,
         )
         npc.components["DestructibleLootTable"] = RowCollection(
             rows=[],
             key_field="id",
-            label_prefix="Loot",
+            label_prefix="LootTable",
             loaded_keys=set(),
             dirty=True,
         )
         npc.components["CurrencyTable"] = RowCollection(
             rows=[],
             key_field="id",
-            label_prefix="Currency",
+            label_prefix="CurrencyTable",
             loaded_keys={comp.currency_index},
             dirty=True,
         )
@@ -1041,18 +1128,20 @@ class NPCService(BaseService):
         collection.dirty = True
         return row
 
-    def _resolve_loot_collections(self, npc: NPC, family: str) -> tuple[RowCollection, RowCollection, int]:
+    def _resolve_loot_collections(self, npc: NPC, family: str) -> tuple[RowCollection, RowCollection, RowCollection, RowCollection, int]:
         if family == "vendor":
-            owner = self.add_vendor_component(npc)
-            matrix_collection = self._ensure_row_collection(npc, "VendorLootMatrix", key_field="ui_key", label_prefix="Matrix")
-            table_collection = self._ensure_row_collection(npc, "VendorLootTable", key_field="id", label_prefix="Loot")
-            loot_matrix_index = owner.loot_matrix_index
+            loot_matrix_index = self._ensure_vendor_loot_matrix_index(npc)
+            matrix_index_collection = self._ensure_loot_matrix_index_collection(npc, "vendor")
+            matrix_collection = self._ensure_row_collection(npc, "VendorLootMatrix", key_field="ui_key", label_prefix="LootMatrix")
+            table_index_collection = self._ensure_loot_table_index_collection(npc, "vendor")
+            table_collection = self._ensure_row_collection(npc, "VendorLootTable", key_field="id", label_prefix="LootTable")
         else:
-            owner = self.add_destructible_component(npc)
-            matrix_collection = self._ensure_row_collection(npc, "DestructibleLootMatrix", key_field="ui_key", label_prefix="Matrix")
-            table_collection = self._ensure_row_collection(npc, "DestructibleLootTable", key_field="id", label_prefix="Loot")
-            loot_matrix_index = owner.loot_matrix_index or 0
-        return matrix_collection, table_collection, loot_matrix_index
+            loot_matrix_index = self._ensure_destructible_loot_matrix_index(npc)
+            matrix_index_collection = self._ensure_loot_matrix_index_collection(npc, "destructible")
+            matrix_collection = self._ensure_row_collection(npc, "DestructibleLootMatrix", key_field="ui_key", label_prefix="LootMatrix")
+            table_index_collection = self._ensure_loot_table_index_collection(npc, "destructible")
+            table_collection = self._ensure_row_collection(npc, "DestructibleLootTable", key_field="id", label_prefix="LootTable")
+        return matrix_index_collection, matrix_collection, table_index_collection, table_collection, loot_matrix_index
 
     def _create_loot_table_row(self, npc: NPC, loot_table_index: int) -> LootTableRow:
         return LootTableRow(
@@ -1067,13 +1156,15 @@ class NPCService(BaseService):
         )
 
     def add_loot_entry(self, npc: NPC, family: str) -> LootMatrixRow:
-        matrix_collection, _table_collection, loot_matrix_index = self._resolve_loot_collections(npc, family)
+        _matrix_index_collection, matrix_collection, table_index_collection, _table_collection, loot_matrix_index = self._resolve_loot_collections(npc, family)
         loot_table_index = self._reserve_next_int(
             self._repo.generate_new_loot_table_index,
             self._collect_loot_table_indices(npc),
             label="loot_table_index",
             object_id=npc.object_id,
         )
+        self._ensure_loot_table_index_row(npc, family, loot_table_index)
+        table_index_collection.dirty = True
         matrix_row = LootMatrixRow(
             loot_matrix_index=loot_matrix_index,
             loot_table_index=loot_table_index,
@@ -1094,13 +1185,15 @@ class NPCService(BaseService):
         return matrix_row
 
     def add_loot_table_row(self, npc: NPC, family: str) -> tuple[LootMatrixRow, LootTableRow]:
-        matrix_collection, table_collection, _loot_matrix_index = self._resolve_loot_collections(npc, family)
+        _matrix_index_collection, matrix_collection, table_index_collection, table_collection, _loot_matrix_index = self._resolve_loot_collections(npc, family)
         matrix_rows = list(matrix_collection.rows or [])
 
         # LootTable rows belong to an existing LootMatrix bucket. Reuse the first
         # bucket when present so adding under the table does not create a new matrix.
         if matrix_rows:
             matrix_row = matrix_rows[0]
+            self._ensure_loot_table_index_row(npc, family, matrix_row.loot_table_index)
+            table_index_collection.dirty = True
             loot_row = self._create_loot_table_row(npc, matrix_row.loot_table_index)
             table_collection.rows.append(loot_row)
             table_collection.dirty = True
@@ -1130,15 +1223,20 @@ class NPCService(BaseService):
         return matrix_row, loot_row
 
     def add_currency_row(self, npc: NPC) -> CurrencyTableRow:
-        destructible = self.add_destructible_component(npc)
-        collection = self._ensure_row_collection(npc, "CurrencyTable", key_field="id", label_prefix="Currency")
-        row = CurrencyTableRow(
-            currency_index=destructible.currency_index or self._reserve_next_int(
+        destructible = npc.components.get("DestructibleComponent")
+        if not isinstance(destructible, DestructibleComponent):
+            destructible = self.add_destructible_component(npc)
+        if destructible.currency_index is None:
+            destructible.currency_index = self._reserve_next_int(
                 self._repo.generate_new_currency_index,
                 self._collect_currency_indices(npc),
                 label="currency_index",
                 object_id=npc.object_id,
-            ),
+            )
+            destructible.dirty = True
+        collection = self._ensure_row_collection(npc, "CurrencyTable", key_field="id", label_prefix="CurrencyTable")
+        row = CurrencyTableRow(
+            currency_index=destructible.currency_index,
             npcminlevel=0,
             minvalue=0,
             maxvalue=0,
@@ -1172,8 +1270,10 @@ class NPCService(BaseService):
     def remove_loot_entry(self, npc: NPC, family: str, loot_table_index: int) -> None:
         if family == "vendor":
             keys = ("VendorLootMatrix", "VendorLootTable")
+            table_index_key = "VendorLootTableIndex"
         else:
             keys = ("DestructibleLootMatrix", "DestructibleLootTable")
+            table_index_key = "DestructibleLootTableIndex"
         for key in keys:
             collection = npc.components.get(key)
             if not isinstance(collection, RowCollection):
@@ -1182,6 +1282,14 @@ class NPCService(BaseService):
             collection.rows = [row for row in collection.rows if getattr(row, "loot_table_index", None) != loot_table_index]
             if len(collection.rows) != before:
                 collection.dirty = True
+        table_index_collection = npc.components.get(table_index_key)
+        if isinstance(table_index_collection, RowCollection):
+            before = len(table_index_collection.rows)
+            table_index_collection.rows = [
+                row for row in table_index_collection.rows if getattr(row, "loot_table_index", None) != loot_table_index
+            ]
+            if len(table_index_collection.rows) != before:
+                table_index_collection.dirty = True
 
     def remove_loot_table_row(self, npc: NPC, family: str, row_id: int) -> None:
         key = "VendorLootTable" if family == "vendor" else "DestructibleLootTable"
@@ -1271,6 +1379,13 @@ class NPCService(BaseService):
         self._copy_fields(src_vendor, vendor, exclude={"id", "loot_matrix_index"})
         vendor.dirty = True
         dup.components["VendorComponent"] = vendor
+        dup.components["VendorLootMatrixIndex"] = RowCollection(
+            rows=[LootMatrixIndexRow(loot_matrix_index=vendor.loot_matrix_index, in_npc_editor=True)],
+            key_field="loot_matrix_index",
+            label_prefix="LootMatrixIndex",
+            loaded_keys=set(),
+            dirty=True,
+        )
 
         loot_index_map: dict[int, int] = {}
         loot_table_indices = self._collect_loot_table_indices(dup)
@@ -1300,7 +1415,7 @@ class NPCService(BaseService):
                     for row in src_matrix.rows
                 ],
                 key_field="ui_key",
-                label_prefix="Matrix",
+                label_prefix="LootMatrix",
                 loaded_keys={vendor.loot_matrix_index},
                 dirty=True,
             )
@@ -1333,10 +1448,17 @@ class NPCService(BaseService):
                     for row in src_table.rows
                 ],
                 key_field="id",
-                label_prefix="Loot",
+                label_prefix="LootTable",
                 loaded_keys=set(loot_index_map.values()),
                 dirty=True,
             )
+        dup.components["VendorLootTableIndex"] = RowCollection(
+            rows=[LootTableIndexRow(loot_table_index=index) for index in sorted(loot_index_map.values())],
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=set(),
+            dirty=bool(loot_index_map),
+        )
 
     def _duplicate_destructible_state(self, src: NPC, dup: NPC, new_id: int) -> None:
         src_destructible = src.components.get("DestructibleComponent")
@@ -1373,6 +1495,14 @@ class NPCService(BaseService):
         )
         destructible.dirty = True
         dup.components["DestructibleComponent"] = destructible
+        if destructible.loot_matrix_index is not None:
+            dup.components["DestructibleLootMatrixIndex"] = RowCollection(
+                rows=[LootMatrixIndexRow(loot_matrix_index=destructible.loot_matrix_index, in_npc_editor=True)],
+                key_field="loot_matrix_index",
+                label_prefix="LootMatrixIndex",
+                loaded_keys=set(),
+                dirty=True,
+            )
 
         loot_index_map: dict[int, int] = {}
         loot_table_indices = self._collect_loot_table_indices(dup)
@@ -1402,7 +1532,7 @@ class NPCService(BaseService):
                     for row in src_matrix.rows
                 ],
                 key_field="ui_key",
-                label_prefix="Matrix",
+                label_prefix="LootMatrix",
                 loaded_keys={destructible.loot_matrix_index} if destructible.loot_matrix_index is not None else set(),
                 dirty=True,
             )
@@ -1435,10 +1565,17 @@ class NPCService(BaseService):
                     for row in src_table.rows
                 ],
                 key_field="id",
-                label_prefix="Loot",
+                label_prefix="LootTable",
                 loaded_keys=set(loot_index_map.values()),
                 dirty=True,
             )
+        dup.components["DestructibleLootTableIndex"] = RowCollection(
+            rows=[LootTableIndexRow(loot_table_index=index) for index in sorted(loot_index_map.values())],
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=set(),
+            dirty=bool(loot_index_map),
+        )
 
         src_currency = src.components.get("CurrencyTable")
         if isinstance(src_currency, RowCollection) and destructible.currency_index is not None:
@@ -1460,7 +1597,7 @@ class NPCService(BaseService):
                     for row in src_currency.rows
                 ],
                 key_field="id",
-                label_prefix="Currency",
+                label_prefix="CurrencyTable",
                 loaded_keys={destructible.currency_index},
                 dirty=True,
             )

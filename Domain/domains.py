@@ -400,12 +400,25 @@ class LootMatrixRow:
 
 
 @dataclass
+class LootMatrixIndexRow:
+    loot_matrix_index: int = 0
+    in_npc_editor: bool = True
+    dirty: bool = False
+
+
+@dataclass
 class LootTableRow:
     itemid: int = INT_32_MAX
     loot_table_index: int = 0
     id: int = INT_32_MAX
     mission_drop: bool = False
     sort_priority: int = 0
+    dirty: bool = False
+
+
+@dataclass
+class LootTableIndexRow:
+    loot_table_index: int = 0
     dirty: bool = False
 
 

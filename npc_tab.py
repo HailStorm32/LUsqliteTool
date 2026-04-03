@@ -15,6 +15,25 @@ log = logging.getLogger(__name__)
 class NPCTab(BaseObjectEntityTab):
     """Tab containing NPC related widgets."""
 
+    HIDDEN_COMPONENTS: set[str] = {
+        "VendorLootMatrixIndex",
+        "VendorLootTableIndex",
+        "DestructibleLootMatrixIndex",
+        "DestructibleLootTableIndex",
+    }
+
+    COMPONENT_DISPLAY_NAMES: dict[str, str] = {
+        "VendorLootMatrixIndex": "LootMatrixIndex (Vendor)",
+        "VendorLootMatrix": "LootMatrix (Vendor)",
+        "VendorLootTableIndex": "LootTableIndex (Vendor)",
+        "VendorLootTable": "LootTable (Vendor)",
+        "DestructibleLootMatrixIndex": "LootMatrixIndex (Destructible)",
+        "DestructibleLootMatrix": "LootMatrix (Destructible)",
+        "DestructibleLootTableIndex": "LootTableIndex (Destructible)",
+        "DestructibleLootTable": "LootTable (Destructible)",
+        "CurrencyTable": "CurrencyTable",
+    }
+
     ROW_COLLECTION_SPECS: dict[str, tuple[str, str]] = {
         "InventoryComponent": ("itemid", "Item"),
         "MissionNPCComponent": ("mission_id", "Mission"),
@@ -22,11 +41,15 @@ class NPCTab(BaseObjectEntityTab):
         "MissionTasks": ("uid", "Task"),
         "MissionText": ("id", "Text"),
         "MissionEmail": ("id", "Email"),
-        "VendorLootMatrix": ("ui_key", "Matrix"),
-        "VendorLootTable": ("id", "Loot"),
-        "DestructibleLootMatrix": ("ui_key", "Matrix"),
-        "DestructibleLootTable": ("id", "Loot"),
-        "CurrencyTable": ("id", "Currency"),
+        "VendorLootMatrixIndex": ("loot_matrix_index", "LootMatrixIndex"),
+        "VendorLootMatrix": ("ui_key", "LootMatrix"),
+        "VendorLootTableIndex": ("loot_table_index", "LootTableIndex"),
+        "VendorLootTable": ("id", "LootTable"),
+        "DestructibleLootMatrixIndex": ("loot_matrix_index", "LootMatrixIndex"),
+        "DestructibleLootMatrix": ("ui_key", "LootMatrix"),
+        "DestructibleLootTableIndex": ("loot_table_index", "LootTableIndex"),
+        "DestructibleLootTable": ("id", "LootTable"),
+        "CurrencyTable": ("id", "CurrencyTable"),
     }
 
     DELETE_COMPONENT_GROUPS: dict[str, list[str]] = {
@@ -36,11 +59,19 @@ class NPCTab(BaseObjectEntityTab):
         "InventoryComponent": ["InventoryComponent"],
         "DestructibleComponent": [
             "DestructibleComponent",
+            "DestructibleLootMatrixIndex",
             "DestructibleLootMatrix",
+            "DestructibleLootTableIndex",
             "DestructibleLootTable",
             "CurrencyTable",
         ],
-        "VendorComponent": ["VendorComponent", "VendorLootMatrix", "VendorLootTable"],
+        "VendorComponent": [
+            "VendorComponent",
+            "VendorLootMatrixIndex",
+            "VendorLootMatrix",
+            "VendorLootTableIndex",
+            "VendorLootTable",
+        ],
         "MissionNPCComponent": [
             "MissionNPCComponent",
             "Missions",
@@ -59,6 +90,12 @@ class NPCTab(BaseObjectEntityTab):
 
     def _load_list_data(self) -> list[dict[str, int | str]]:
         return self._service.list_npcs(limit=None)
+
+    def _is_component_visible(self, component_type: str, component: Any | None = None) -> bool:
+        return component_type not in self.HIDDEN_COMPONENTS
+
+    def _get_component_display_name(self, component_type: str) -> str:
+        return self.COMPONENT_DISPLAY_NAMES.get(component_type, component_type)
 
     def _build_widgets(self) -> None:
         paned = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
@@ -598,14 +635,14 @@ class NPCTab(BaseObjectEntityTab):
             default=messagebox.NO,
         ):
             return
-        matrix_key, table_key = (
-            ("VendorLootMatrix", "VendorLootTable")
+        matrix_key, table_index_key, table_key = (
+            ("VendorLootMatrix", "VendorLootTableIndex", "VendorLootTable")
             if family == "vendor"
-            else ("DestructibleLootMatrix", "DestructibleLootTable")
+            else ("DestructibleLootMatrix", "DestructibleLootTableIndex", "DestructibleLootTable")
         )
         snapshot: dict[str, list[Any]] = {}
         dirty_before: dict[str, bool] = {}
-        for key in (matrix_key, table_key):
+        for key in (matrix_key, table_index_key, table_key):
             collection = obj.components.get(key)
             if not self._is_row_collection_component(collection):
                 continue

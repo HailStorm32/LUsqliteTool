@@ -180,6 +180,12 @@ class BaseObjectEntityTab(ttk.Frame):
         prefix = self._get_component_label_prefix(component)
         return f"{prefix} {self._get_collection_row_display_key(component, row)}"
 
+    def _get_component_display_name(self, component_type: str) -> str:
+        return component_type
+
+    def _is_component_visible(self, component_type: str, component: Any | None = None) -> bool:
+        return True
+
     def _resolve_form_target(
         self,
         obj: Any,
@@ -203,6 +209,11 @@ class BaseObjectEntityTab(ttk.Frame):
         component = obj.components.get(component_type)
         if component is None:
             return {"message": f"Component '{component_type}' not present"}
+        if not self._is_component_visible(component_type, component):
+            display_name = self._get_component_display_name(component_type)
+            return {"message": f"{display_name} is managed automatically."}
+
+        display_name = self._get_component_display_name(component_type)
 
         if self._is_row_collection_component(component):
             key_field = self._get_component_key_field(component)
@@ -220,7 +231,7 @@ class BaseObjectEntityTab(ttk.Frame):
             return {
                 "target": row,
                 "exclude": {"dirty"},
-                "title": f"{component_type} row {self._get_collection_row_display_key(component, row)} of {obj.object_id}",
+                "title": f"{display_name} row {self._get_collection_row_display_key(component, row)} of {obj.object_id}",
                 "metadata_key": row.__class__.__name__,
                 "collection": component,
                 "key_field": key_field,
@@ -231,7 +242,7 @@ class BaseObjectEntityTab(ttk.Frame):
         return {
             "target": component,
             "exclude": {"dirty"},
-            "title": f"Component '{component_type}' of {obj.object_id}",
+            "title": f"Component '{display_name}' of {obj.object_id}",
             "metadata_key": component_type,
             "collection": None,
             "key_field": None,
@@ -339,8 +350,10 @@ class BaseObjectEntityTab(ttk.Frame):
         # Keep row collections flat under their group node so deeper schema chains
         # still fit the existing tree without turning the sidebar into a maze.
         for key, component in (getattr(obj, "components", {}) or {}).items():
+            if not self._is_component_visible(key, component):
+                continue
             child_iid = f"{parent_iid}:{key}"
-            self.tree.insert(parent_iid, tk.END, iid=child_iid, text=key)
+            self.tree.insert(parent_iid, tk.END, iid=child_iid, text=self._get_component_display_name(key))
             if not self._is_row_collection_component(component):
                 continue
             for row in self._get_component_rows(component):
@@ -381,6 +394,12 @@ class BaseObjectEntityTab(ttk.Frame):
         root_iid = self._refresh_object_branch(obj.object_id, obj)
         if root_iid is None:
             return
+
+        if component_type != "object":
+            component = (getattr(obj, "components", {}) or {}).get(component_type)
+            if component is None or not self._is_component_visible(component_type, component):
+                component_type = "object"
+                grandchild_iid = None
 
         target_iid = root_iid
         if component_type != "object":

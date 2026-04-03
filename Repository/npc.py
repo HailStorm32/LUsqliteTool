@@ -9,8 +9,10 @@ from Domain.domains import (
     CurrencyTableRow,
     DestructibleComponent,
     InventoryComponentRow,
+    LootMatrixIndexRow,
     LootMatrixRow,
     LootTableRow,
+    LootTableIndexRow,
     MinifigComponent,
     MissionEmailRow,
     MissionNPCComponentRow,
@@ -128,9 +130,19 @@ _SCRIPT_MAP = {
     "client_script_name": "client_script_name",
 }
 
+_LOOT_MATRIX_INDEX_MAP = {
+    "loot_matrix_index": "LootMatrixIndex",
+    "in_npc_editor": "inNpcEditor",
+}
+
+_LOOT_TABLE_INDEX_MAP = {
+    "loot_table_index": "LootTableIndex",
+}
+
 _BOOL_FIELDS = {
     "RenderComponent": {"fade", "use_drop_shadow", "preload_animations", "ignore_camera_collision", "gradual_snap", "static_billboard", "attach_indicators_to_node"},
     "DestructibleComponent": {"is_npc", "is_smashable"},
+    "LootMatrixIndexRow": {"in_npc_editor"},
     "InventoryComponentRow": {"equip"},
     "MissionNPCComponentRow": {"offers_mission", "accepts_mission"},
     "LootTableRow": {"mission_drop"},
@@ -266,6 +278,9 @@ class NPCRepository(baseRepository):
         super().__init__(db_path)
         self._log = logging.getLogger(__name__)
 
+    def _has_linked_index(self, value: Any) -> bool:
+        return isinstance(value, int) and value > 0
+
     def list_npcs(self, limit: int | None = None) -> list[dict[str, int | str]]:
         conn = self._connect_to_db()
         try:
@@ -313,7 +328,7 @@ class NPCRepository(baseRepository):
         return self._next_int("LootMatrixIndex", "LootMatrixIndex")
 
     def generate_new_loot_table_index(self) -> int:
-        return self._next_int("LootTable", "LootTableIndex")
+        return self._next_int("LootTableIndex", "LootTableIndex")
 
     def generate_new_loot_table_row_id(self) -> int:
         return self._next_int("LootTable", "id")
@@ -442,9 +457,11 @@ class NPCRepository(baseRepository):
             self._save_direct_component(conn, npc, "RenderComponent", "RenderComponent", _RENDER_MAP)
             self._save_direct_component(conn, npc, "MinifigComponent", "MinifigComponent", _MINIFIG_MAP)
             self._save_direct_component(conn, npc, "PhysicsComponent", "PhysicsComponent", _PHYSICS_MAP)
+            self._save_direct_component(conn, npc, "ScriptComponent", "ScriptComponent", _SCRIPT_MAP)
+            self._save_vendor_index_rows(conn, npc)
+            self._save_destructible_index_rows(conn, npc)
             self._save_direct_component(conn, npc, "DestructibleComponent", "DestructibleComponent", _DESTRUCTIBLE_MAP)
             self._save_direct_component(conn, npc, "VendorComponent", "VendorComponent", _VENDOR_MAP)
-            self._save_direct_component(conn, npc, "ScriptComponent", "ScriptComponent", _SCRIPT_MAP)
 
             self._save_inventory_rows(conn, npc)
             self._save_mission_npc_rows(conn, npc)
@@ -488,8 +505,10 @@ class NPCRepository(baseRepository):
             self._delete_single_component(conn, npc.components.get("RenderComponent"), "RenderComponent")
             self._delete_single_component(conn, npc.components.get("MinifigComponent"), "MinifigComponent")
             self._delete_single_component(conn, npc.components.get("PhysicsComponent"), "PhysicsComponent")
-            self._delete_single_component(conn, npc.components.get("DestructibleComponent"), "DestructibleComponent")
             self._delete_single_component(conn, npc.components.get("VendorComponent"), "VendorComponent")
+            self._delete_vendor_index_rows(conn, npc)
+            self._delete_single_component(conn, npc.components.get("DestructibleComponent"), "DestructibleComponent")
+            self._delete_destructible_index_rows(conn, npc)
             self._delete_single_component(conn, npc.components.get("ScriptComponent"), "ScriptComponent")
             conn.execute("DELETE FROM ComponentsRegistry WHERE id=?", (object_id,))
             conn.execute("DELETE FROM Objects WHERE id=?", (object_id,))
@@ -546,6 +565,7 @@ class NPCRepository(baseRepository):
                 self._delete_vendor_rows(conn, npc)
                 if component_id is not None:
                     conn.execute("DELETE FROM VendorComponent WHERE id=?", (component_id,))
+                self._delete_vendor_index_rows(conn, npc)
                 conn.execute(
                     "DELETE FROM ComponentsRegistry WHERE id=? AND component_type=?",
                     (object_id, Components.VENDOR),
@@ -555,6 +575,7 @@ class NPCRepository(baseRepository):
                 self._delete_destructible_rows(conn, npc)
                 if component_id is not None:
                     conn.execute("DELETE FROM DestructibleComponent WHERE id=?", (component_id,))
+                self._delete_destructible_index_rows(conn, npc)
                 conn.execute(
                     "DELETE FROM ComponentsRegistry WHERE id=? AND component_type=?",
                     (object_id, Components.DESTROYABLE),
@@ -810,48 +831,187 @@ class NPCRepository(baseRepository):
         collection.loaded_keys = {component_id}
         collection.dirty = False
 
+    def _save_keyed_row_collection(
+        self,
+        conn: sqlite3.Connection,
+        collection: Any,
+        *,
+        table: str,
+        scope_column: str,
+        field_map: dict[str, str],
+    ) -> None:
+        if not isinstance(collection, RowCollection) or not collection.dirty:
+            return
+        current_keys = {
+            getattr(row, collection.key_field, None)
+            for row in collection.rows
+            if getattr(row, collection.key_field, None) is not None
+        }
+        self._replace_rows_by_scope(
+            conn,
+            table,
+            scope_column,
+            set(collection.loaded_keys) | current_keys,
+            collection.rows,
+            field_map,
+        )
+        collection.loaded_keys = current_keys
+        collection.dirty = False
+
+    def _save_vendor_index_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
+        self._sync_vendor_index_collections(npc)
+        self._save_keyed_row_collection(
+            conn,
+            npc.components.get("VendorLootMatrixIndex"),
+            table="LootMatrixIndex",
+            scope_column="LootMatrixIndex",
+            field_map=_LOOT_MATRIX_INDEX_MAP,
+        )
+        self._save_keyed_row_collection(
+            conn,
+            npc.components.get("VendorLootTableIndex"),
+            table="LootTableIndex",
+            scope_column="LootTableIndex",
+            field_map=_LOOT_TABLE_INDEX_MAP,
+        )
+
+    def _save_destructible_index_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
+        self._sync_destructible_index_collections(npc)
+        self._save_keyed_row_collection(
+            conn,
+            npc.components.get("DestructibleLootMatrixIndex"),
+            table="LootMatrixIndex",
+            scope_column="LootMatrixIndex",
+            field_map=_LOOT_MATRIX_INDEX_MAP,
+        )
+        self._save_keyed_row_collection(
+            conn,
+            npc.components.get("DestructibleLootTableIndex"),
+            table="LootTableIndex",
+            scope_column="LootTableIndex",
+            field_map=_LOOT_TABLE_INDEX_MAP,
+        )
+
+    def _sync_single_matrix_index_collection(self, npc: NPC, component_key: str, collection_key: str) -> None:
+        component = npc.components.get(component_key)
+        if component is None:
+            return
+        loot_matrix_index = getattr(component, "loot_matrix_index", None)
+        collection = npc.components.get(collection_key)
+        if not isinstance(collection, RowCollection):
+            collection = RowCollection(rows=[], key_field="loot_matrix_index", label_prefix="LootMatrixIndex")
+            npc.components[collection_key] = collection
+        current_rows = list(collection.rows)
+        if not self._has_linked_index(loot_matrix_index):
+            desired_rows: list[LootMatrixIndexRow] = []
+        else:
+            current_row = next(
+                (row for row in current_rows if getattr(row, "loot_matrix_index", None) == loot_matrix_index),
+                None,
+            )
+            desired_rows = [
+                LootMatrixIndexRow(
+                    loot_matrix_index=int(loot_matrix_index),
+                    in_npc_editor=bool(getattr(current_row, "in_npc_editor", True)),
+                )
+            ]
+        if current_rows != desired_rows:
+            collection.rows = desired_rows
+            collection.dirty = True
+
+    def _sync_loot_table_index_collection(self, npc: NPC, matrix_key: str, table_key: str, collection_key: str) -> None:
+        collection = npc.components.get(collection_key)
+        if not isinstance(collection, RowCollection):
+            collection = RowCollection(rows=[], key_field="loot_table_index", label_prefix="LootTableIndex")
+            npc.components[collection_key] = collection
+        current_rows = list(collection.rows)
+        current_indices = {
+            getattr(row, "loot_table_index", None)
+            for row in current_rows
+            if getattr(row, "loot_table_index", None) is not None
+        }
+        desired_indices = {
+            getattr(row, "loot_table_index", None)
+            for key in (matrix_key, table_key)
+            for row in getattr(npc.components.get(key), "rows", []) or []
+            if getattr(row, "loot_table_index", None) is not None
+        }
+        desired_rows = [LootTableIndexRow(loot_table_index=int(index)) for index in sorted(desired_indices)]
+        if current_rows != desired_rows or current_indices != desired_indices:
+            collection.rows = desired_rows
+            collection.dirty = True
+
+    def _sync_vendor_index_collections(self, npc: NPC) -> None:
+        self._sync_single_matrix_index_collection(npc, "VendorComponent", "VendorLootMatrixIndex")
+        self._sync_loot_table_index_collection(npc, "VendorLootMatrix", "VendorLootTable", "VendorLootTableIndex")
+
+    def _sync_destructible_index_collections(self, npc: NPC) -> None:
+        self._sync_single_matrix_index_collection(npc, "DestructibleComponent", "DestructibleLootMatrixIndex")
+        self._sync_loot_table_index_collection(
+            npc,
+            "DestructibleLootMatrix",
+            "DestructibleLootTable",
+            "DestructibleLootTableIndex",
+        )
+
     def _attach_vendor_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
         vendor = npc.components.get("VendorComponent")
         if not isinstance(vendor, VendorComponent):
             return
 
-        matrix_rows = conn.execute(
-            """
-            SELECT rowid AS row_id, *
-            FROM LootMatrix
-            WHERE LootMatrixIndex=?
-            ORDER BY rowid
-            """,
-            (vendor.loot_matrix_index,),
-        ).fetchall()
-        vendor_matrix = [
-            LootMatrixRow(
-                row_id=row["row_id"],
-                loot_matrix_index=row["LootMatrixIndex"],
-                loot_table_index=row["LootTableIndex"],
-                rarity_table_index=row["RarityTableIndex"],
-                percent=row["percent"],
-                min_to_drop=row["minToDrop"],
-                max_to_drop=row["maxToDrop"],
-                id=row["id"],
-                flag_id=row["flagID"],
-                gate_version=row["gate_version"],
-            )
-            for row in matrix_rows
-        ]
+        loot_matrix_indices: set[int] = set()
+        vendor_matrix: list[LootMatrixRow] = []
+        if self._has_linked_index(vendor.loot_matrix_index):
+            loot_matrix_indices = {int(vendor.loot_matrix_index)}
+            matrix_rows = conn.execute(
+                """
+                SELECT rowid AS row_id, *
+                FROM LootMatrix
+                WHERE LootMatrixIndex=?
+                ORDER BY rowid
+                """,
+                (vendor.loot_matrix_index,),
+            ).fetchall()
+            vendor_matrix = [
+                LootMatrixRow(
+                    row_id=row["row_id"],
+                    loot_matrix_index=row["LootMatrixIndex"],
+                    loot_table_index=row["LootTableIndex"],
+                    rarity_table_index=row["RarityTableIndex"],
+                    percent=row["percent"],
+                    min_to_drop=row["minToDrop"],
+                    max_to_drop=row["maxToDrop"],
+                    id=row["id"],
+                    flag_id=row["flagID"],
+                    gate_version=row["gate_version"],
+                )
+                for row in matrix_rows
+            ]
         loot_table_indices = {row.loot_table_index for row in vendor_matrix}
+        npc.components["VendorLootMatrixIndex"] = RowCollection(
+            rows=self._load_loot_matrix_index_rows(conn, loot_matrix_indices),
+            key_field="loot_matrix_index",
+            label_prefix="LootMatrixIndex",
+            loaded_keys=loot_matrix_indices,
+        )
         loot_table_rows = self._load_loot_tables_by_indices(conn, loot_table_indices)
 
         npc.components["VendorLootMatrix"] = RowCollection(
             rows=vendor_matrix,
             key_field="ui_key",
-            label_prefix="Matrix",
-            loaded_keys={vendor.loot_matrix_index},
+            label_prefix="LootMatrix",
+            loaded_keys=loot_matrix_indices,
+        )
+        npc.components["VendorLootTableIndex"] = RowCollection(
+            rows=self._load_loot_table_index_rows(conn, loot_table_indices),
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=loot_table_indices,
         )
         npc.components["VendorLootTable"] = RowCollection(
             rows=loot_table_rows,
             key_field="id",
-            label_prefix="Loot",
+            label_prefix="LootTable",
             loaded_keys=loot_table_indices,
         )
 
@@ -862,7 +1022,9 @@ class NPCRepository(baseRepository):
 
         matrix_rows: list[LootMatrixRow] = []
         loot_table_indices: set[int] = set()
+        loot_matrix_indices: set[int] = set()
         if destructible.loot_matrix_index is not None:
+            loot_matrix_indices = {destructible.loot_matrix_index}
             rows = conn.execute(
                 """
                 SELECT rowid AS row_id, *
@@ -889,16 +1051,28 @@ class NPCRepository(baseRepository):
             ]
             loot_table_indices = {row.loot_table_index for row in matrix_rows}
 
+        npc.components["DestructibleLootMatrixIndex"] = RowCollection(
+            rows=self._load_loot_matrix_index_rows(conn, loot_matrix_indices),
+            key_field="loot_matrix_index",
+            label_prefix="LootMatrixIndex",
+            loaded_keys=loot_matrix_indices,
+        )
         npc.components["DestructibleLootMatrix"] = RowCollection(
             rows=matrix_rows,
             key_field="ui_key",
-            label_prefix="Matrix",
-            loaded_keys={destructible.loot_matrix_index} if destructible.loot_matrix_index is not None else set(),
+            label_prefix="LootMatrix",
+            loaded_keys=loot_matrix_indices,
+        )
+        npc.components["DestructibleLootTableIndex"] = RowCollection(
+            rows=self._load_loot_table_index_rows(conn, loot_table_indices),
+            key_field="loot_table_index",
+            label_prefix="LootTableIndex",
+            loaded_keys=loot_table_indices,
         )
         npc.components["DestructibleLootTable"] = RowCollection(
             rows=self._load_loot_tables_by_indices(conn, loot_table_indices),
             key_field="id",
-            label_prefix="Loot",
+            label_prefix="LootTable",
             loaded_keys=loot_table_indices,
         )
 
@@ -928,8 +1102,25 @@ class NPCRepository(baseRepository):
         npc.components["CurrencyTable"] = RowCollection(
             rows=currency_rows,
             key_field="id",
-            label_prefix="Currency",
+            label_prefix="CurrencyTable",
             loaded_keys=loaded_currency_keys,
+        )
+
+    def _load_loot_matrix_index_rows(
+        self,
+        conn: sqlite3.Connection,
+        loot_matrix_indices: Iterable[int],
+    ) -> list[LootMatrixIndexRow]:
+        ids = sorted({int(idx) for idx in loot_matrix_indices if idx is not None})
+        if not ids:
+            return []
+        return self._load_rows_by_ids(
+            conn,
+            "LootMatrixIndex",
+            "LootMatrixIndex",
+            set(ids),
+            LootMatrixIndexRow,
+            _LOOT_MATRIX_INDEX_MAP,
         )
 
     def _load_loot_tables_by_indices(
@@ -959,6 +1150,23 @@ class NPCRepository(baseRepository):
             )
             for row in rows
         ]
+
+    def _load_loot_table_index_rows(
+        self,
+        conn: sqlite3.Connection,
+        loot_table_indices: Iterable[int],
+    ) -> list[LootTableIndexRow]:
+        ids = sorted({int(idx) for idx in loot_table_indices if idx is not None})
+        if not ids:
+            return []
+        return self._load_rows_by_ids(
+            conn,
+            "LootTableIndex",
+            "LootTableIndex",
+            set(ids),
+            LootTableIndexRow,
+            _LOOT_TABLE_INDEX_MAP,
+        )
 
     def _attach_mission_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
         mission_collection = npc.components.get("MissionNPCComponent")
@@ -1028,35 +1236,37 @@ class NPCRepository(baseRepository):
 
         if isinstance(matrix_collection, RowCollection) and matrix_collection.dirty:
             keys = set(matrix_collection.loaded_keys)
-            keys.add(vendor.loot_matrix_index)
+            if self._has_linked_index(vendor.loot_matrix_index):
+                keys.add(int(vendor.loot_matrix_index))
             for key in keys:
                 if key is None:
                     continue
                 conn.execute("DELETE FROM LootMatrix WHERE LootMatrixIndex=?", (key,))
-            for row in matrix_collection.rows:
-                result = conn.execute(
-                    """
-                    INSERT INTO LootMatrix (
-                        LootMatrixIndex, LootTableIndex, RarityTableIndex, percent,
-                        minToDrop, maxToDrop, id, flagID, gate_version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        vendor.loot_matrix_index,
-                        row.loot_table_index,
-                        row.rarity_table_index,
-                        row.percent,
-                        row.min_to_drop,
-                        row.max_to_drop,
-                        row.id,
-                        row.flag_id,
-                        row.gate_version,
-                    ),
-                )
-                row.loot_matrix_index = vendor.loot_matrix_index
-                row.row_id = result.lastrowid
-                row.dirty = False
-            matrix_collection.loaded_keys = {vendor.loot_matrix_index}
+            if self._has_linked_index(vendor.loot_matrix_index):
+                for row in matrix_collection.rows:
+                    result = conn.execute(
+                        """
+                        INSERT INTO LootMatrix (
+                            LootMatrixIndex, LootTableIndex, RarityTableIndex, percent,
+                            minToDrop, maxToDrop, id, flagID, gate_version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            vendor.loot_matrix_index,
+                            row.loot_table_index,
+                            row.rarity_table_index,
+                            row.percent,
+                            row.min_to_drop,
+                            row.max_to_drop,
+                            row.id,
+                            row.flag_id,
+                            row.gate_version,
+                        ),
+                    )
+                    row.loot_matrix_index = vendor.loot_matrix_index
+                    row.row_id = result.lastrowid
+                    row.dirty = False
+            matrix_collection.loaded_keys = {int(vendor.loot_matrix_index)} if self._has_linked_index(vendor.loot_matrix_index) else set()
             matrix_collection.dirty = False
 
         if isinstance(table_collection, RowCollection) and table_collection.dirty:
@@ -1309,11 +1519,20 @@ class NPCRepository(baseRepository):
         vendor = npc.components.get("VendorComponent")
         if not isinstance(vendor, VendorComponent):
             return
-        conn.execute("DELETE FROM LootMatrix WHERE LootMatrixIndex=?", (vendor.loot_matrix_index,))
+        if self._has_linked_index(vendor.loot_matrix_index):
+            conn.execute("DELETE FROM LootMatrix WHERE LootMatrixIndex=?", (vendor.loot_matrix_index,))
         loot_table_collection = npc.components.get("VendorLootTable")
         indices = self._extract_loot_table_indices(loot_table_collection)
         for index in indices:
             conn.execute("DELETE FROM LootTable WHERE LootTableIndex=?", (index,))
+
+    def _delete_vendor_index_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
+        vendor = npc.components.get("VendorComponent")
+        if isinstance(vendor, VendorComponent) and self._has_linked_index(vendor.loot_matrix_index):
+            conn.execute("DELETE FROM LootMatrixIndex WHERE LootMatrixIndex=?", (vendor.loot_matrix_index,))
+        loot_table_collection = npc.components.get("VendorLootTableIndex")
+        for index in self._extract_index_collection_keys(loot_table_collection):
+            conn.execute("DELETE FROM LootTableIndex WHERE LootTableIndex=?", (index,))
 
     def _delete_destructible_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
         destructible = npc.components.get("DestructibleComponent")
@@ -1326,6 +1545,14 @@ class NPCRepository(baseRepository):
             conn.execute("DELETE FROM LootTable WHERE LootTableIndex=?", (index,))
         if destructible.currency_index is not None:
             conn.execute("DELETE FROM CurrencyTable WHERE currencyIndex=?", (destructible.currency_index,))
+
+    def _delete_destructible_index_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
+        destructible = npc.components.get("DestructibleComponent")
+        if isinstance(destructible, DestructibleComponent) and destructible.loot_matrix_index is not None:
+            conn.execute("DELETE FROM LootMatrixIndex WHERE LootMatrixIndex=?", (destructible.loot_matrix_index,))
+        loot_table_collection = npc.components.get("DestructibleLootTableIndex")
+        for index in self._extract_index_collection_keys(loot_table_collection):
+            conn.execute("DELETE FROM LootTableIndex WHERE LootTableIndex=?", (index,))
 
     def _delete_mission_rows(self, conn: sqlite3.Connection, npc: NPC) -> None:
         mission_component = npc.components.get("MissionNPCComponent")
@@ -1353,6 +1580,16 @@ class NPCRepository(baseRepository):
         if not isinstance(collection, RowCollection):
             return set()
         return {row.loot_table_index for row in collection.rows}
+
+    def _extract_index_collection_keys(self, collection: Any) -> set[int]:
+        if not isinstance(collection, RowCollection):
+            return set()
+        key_field = collection.key_field
+        return {
+            int(getattr(row, key_field))
+            for row in collection.rows
+            if getattr(row, key_field, None) is not None
+        }
 
     def _mark_all_clean(self, npc: NPC) -> None:
         npc.dirty = False
