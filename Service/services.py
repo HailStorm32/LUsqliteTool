@@ -557,8 +557,105 @@ class NPCService(BaseService):
             log.exception("Error listing NPC IDs")
             return []
 
+    def save(self, obj: Any) -> None:
+        if isinstance(obj, NPC):
+            self._validate_npc_before_save(obj)
+        super().save(obj)
+
     def save_npc(self, npc: NPC) -> None:
         self.save(npc)
+
+    def _validate_npc_before_save(self, npc: NPC) -> None:
+        self._validate_vendor_loot_state(npc)
+
+    def _validate_vendor_loot_state(self, npc: NPC) -> None:
+        vendor = npc.components.get("VendorComponent")
+        if not isinstance(vendor, VendorComponent):
+            return
+
+        loot_matrix_index = getattr(vendor, "loot_matrix_index", None)
+        if not self._has_linked_index(loot_matrix_index):
+            log.error(
+                "Vendor save validation failed object_id=%s reason=missing_loot_matrix_index",
+                npc.object_id,
+            )
+            raise ValueError(
+                "VendorComponent requires a valid LootMatrix before saving.\n\n"
+                "Add a vendor loot matrix and at least one linked loot table entry."
+            )
+
+        matrix_collection = npc.components.get("VendorLootMatrix")
+        matrix_rows = [
+            row
+            for row in getattr(matrix_collection, "rows", []) or []
+            if getattr(row, "loot_matrix_index", None) == loot_matrix_index
+        ] if isinstance(matrix_collection, RowCollection) else []
+        if not matrix_rows:
+            log.error(
+                "Vendor save validation failed object_id=%s loot_matrix_index=%s reason=no_matrix_rows",
+                npc.object_id,
+                loot_matrix_index,
+            )
+            raise ValueError(
+                f"VendorComponent LootMatrixIndex {loot_matrix_index} does not link to any LootMatrix rows.\n\n"
+                "Add a vendor loot matrix and at least one linked loot table entry before saving."
+            )
+
+        table_collection = npc.components.get("VendorLootTable")
+        table_rows = list(getattr(table_collection, "rows", []) or []) if isinstance(table_collection, RowCollection) else []
+        table_indices_with_rows = {
+            int(getattr(row, "loot_table_index"))
+            for row in table_rows
+            if isinstance(getattr(row, "loot_table_index", None), int) and int(getattr(row, "loot_table_index")) > 0
+        }
+        invalid_linked_table_indices = sorted({
+            getattr(row, "loot_table_index", None)
+            for row in matrix_rows
+            if not isinstance(getattr(row, "loot_table_index", None), int) or int(getattr(row, "loot_table_index")) <= 0
+        })
+        linked_table_indices = {
+            int(getattr(row, "loot_table_index"))
+            for row in matrix_rows
+            if isinstance(getattr(row, "loot_table_index", None), int) and int(getattr(row, "loot_table_index")) > 0
+        }
+
+        if invalid_linked_table_indices:
+            invalid_text = ", ".join(str(index) for index in invalid_linked_table_indices)
+            log.error(
+                "Vendor save validation failed object_id=%s loot_matrix_index=%s invalid_loot_table_indices=%s",
+                npc.object_id,
+                loot_matrix_index,
+                invalid_text,
+            )
+            raise ValueError(
+                f"VendorComponent LootMatrixIndex {loot_matrix_index} contains LootMatrix rows with invalid LootTableIndex values: {invalid_text}.\n\n"
+                "Each vendor loot matrix entry must link to a valid loot table row before saving."
+            )
+
+        if not linked_table_indices:
+            log.error(
+                "Vendor save validation failed object_id=%s loot_matrix_index=%s reason=no_linked_loot_tables",
+                npc.object_id,
+                loot_matrix_index,
+            )
+            raise ValueError(
+                f"VendorComponent LootMatrixIndex {loot_matrix_index} does not link to any LootTable rows.\n\n"
+                "Add at least one vendor loot table entry before saving."
+            )
+
+        missing_table_indices = sorted(linked_table_indices - table_indices_with_rows)
+        if missing_table_indices:
+            missing_text = ", ".join(str(index) for index in missing_table_indices)
+            log.error(
+                "Vendor save validation failed object_id=%s loot_matrix_index=%s missing_loot_table_indices=%s",
+                npc.object_id,
+                loot_matrix_index,
+                missing_text,
+            )
+            raise ValueError(
+                f"VendorComponent LootMatrixIndex {loot_matrix_index} references LootTableIndex values with no LootTable rows: {missing_text}.\n\n"
+                "Each vendor loot matrix entry must link to at least one loot table row before saving."
+            )
 
     def _resolve_new_object_id(self, object_id: int | None) -> int:
         if object_id is not None:
@@ -837,7 +934,7 @@ class NPCService(BaseService):
             dirty=True,
         )
         self.add_loot_table_row(npc, "vendor")
-        self._repo.save(npc)
+        self.save(npc)
         return self._repo.get(new_id) or npc
 
     def create_default_mission_npc(self, object_id: int | None = None) -> NPC:
@@ -883,7 +980,7 @@ class NPCService(BaseService):
             label_prefix="Item",
         )
         self.add_mission_bundle(npc, mark_existing_dirty=True)
-        self._repo.save(npc)
+        self.save(npc)
         return self._repo.get(new_id) or npc
 
     def add_render_component(self, npc: NPC) -> RenderComponent:
@@ -1361,7 +1458,7 @@ class NPCService(BaseService):
         self._duplicate_destructible_state(src, dup, new_id)
         self._duplicate_mission_state(src, dup, new_id)
 
-        self._repo.save(dup)
+        self.save(dup)
         return self._repo.get(new_id) or dup
 
     def _duplicate_vendor_state(self, src: NPC, dup: NPC, new_id: int) -> None:
