@@ -266,7 +266,7 @@ component_field_metadata = {
         "row_id":                { "tip": "SQLite row id",                            "display_name": "", "type": int,   "min": None, "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "loot_matrix_index":     { "tip": "Loot matrix index",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": 0 },
         "loot_table_index":      { "tip": "Loot table index",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": 0 },
-        "rarity_table_index":    { "tip": "Rarity table index",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
+        "rarity_table_index":    { "tip": "Rarity table index",                       "display_name": "", "type": int,   "min": 2,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 2 },
         "percent":               { "tip": "Drop chance percentage",                    "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": False, "default": 1.0 },
         "min_to_drop":           { "tip": "Minimum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 0 },
         "max_to_drop":           { "tip": "Maximum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },

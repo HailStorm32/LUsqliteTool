@@ -836,6 +836,7 @@ class NPCService(BaseService):
             loaded_keys=set(),
             dirty=True,
         )
+        self.add_loot_table_row(npc, "vendor")
         self._repo.save(npc)
         return self._repo.get(new_id) or npc
 
@@ -1163,12 +1164,13 @@ class NPCService(BaseService):
             label="loot_table_index",
             object_id=npc.object_id,
         )
+        rarity_table_index = int(self._repo.get_default_rarity_table_index())
         self._ensure_loot_table_index_row(npc, family, loot_table_index)
         table_index_collection.dirty = True
         matrix_row = LootMatrixRow(
             loot_matrix_index=loot_matrix_index,
             loot_table_index=loot_table_index,
-            rarity_table_index=1,
+            rarity_table_index=rarity_table_index,
             percent=1.0,
             min_to_drop=0,
             max_to_drop=1,

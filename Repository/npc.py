@@ -333,6 +333,18 @@ class NPCRepository(baseRepository):
     def generate_new_loot_table_row_id(self) -> int:
         return self._next_int("LootTable", "id")
 
+    def get_default_rarity_table_index(self) -> int:
+        conn = self._connect_to_db()
+        try:
+            row = conn.execute(
+                'SELECT RarityTableIndex FROM RarityTableIndex ORDER BY RarityTableIndex LIMIT 1'
+            ).fetchone()
+            if not row:
+                raise ValueError("RarityTableIndex table is empty")
+            return int(row["RarityTableIndex"])
+        finally:
+            conn.close()
+
     def generate_new_currency_index(self) -> int:
         return self._next_int("CurrencyTable", "currencyIndex")
 
