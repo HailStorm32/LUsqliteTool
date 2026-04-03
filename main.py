@@ -86,6 +86,8 @@ if __name__ == "__main__":
 
 """
 TODO:
+- Investigate adding items to vendor inventory. Currenly throws key error when saving
+- Investigate why NPC spawns with default bob figure
 - Pull ColorType values from DB (BrickColors table) instead of hardcoding
 
 

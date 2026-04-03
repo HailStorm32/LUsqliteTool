@@ -166,6 +166,20 @@ component_field_metadata = {
     # ---------------------------------------------------------------
     "DestructibleComponent": {
         "id":                          { "tip": "Primary key / component id",            "display_name": "",     "type": int,        "min": 1,         "max": INT_32_MAX,    "readonly": True,   "advanced": False, "default": None },
+        "faction":                     { "tip": "Primary faction id",                     "display_name": "",     "type": int,        "min": -1,        "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": -1 },
+        "faction_list":                { "tip": "Faction list token string",              "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": False,  "advanced": False, "default": "-1" },
+        "life":                        { "tip": "Health / life value",                    "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 1 },
+        "imagination":                 { "tip": "Imagination / mana value",               "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": None },
+        "loot_matrix_index":           { "tip": "Linked loot matrix index",               "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": True,  "default": None },
+        "currency_index":              { "tip": "Linked currency table index",            "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": True,  "default": None },
+        "level":                       { "tip": "NPC level",                              "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0 },
+        "armor":                       { "tip": "Armor value",                            "display_name": "",     "type": float,      "min": 0.0,       "max": FLOAT_32_MAX,  "readonly": False,  "advanced": False, "default": 0.0 },
+        "death_behavior":              { "tip": "Death behavior id",                      "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": True,  "default": 0 },
+        "is_npc":                      { "tip": "Treat as NPC",                           "display_name": "",     "type": bool,       "min": None,      "max": None,          "readonly": False,  "advanced": False, "default": True },
+        "attack_priority":             { "tip": "AI attack priority",                     "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": True,  "default": 1 },
+        "is_smashable":                { "tip": "Can be smashed",                         "display_name": "",     "type": bool,       "min": None,      "max": None,          "readonly": False,  "advanced": False, "default": False },
+        "difficulty_level":            { "tip": "Difficulty level",                       "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": True,  "default": None },
+        "dirty":                       { "tip": "Internal dirty flag (not editable)",     "display_name": "",     "type": bool,       "min": None,      "max": None,          "readonly": True,   "advanced": True,  "default": None },
     },
 
     # ---------------------------------------------------------------

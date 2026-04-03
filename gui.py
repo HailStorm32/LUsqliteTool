@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import tkinter as tk
+from copy import deepcopy
 from tkinter import ttk, messagebox
 from enum import Enum, IntEnum, StrEnum
 from pathlib import Path
@@ -367,6 +369,57 @@ class BaseObjectEntityTab(ttk.Frame):
             return root_iid
         self._populate_object_children(root_iid, obj)
         return root_iid
+
+    def _focus_object_target(
+        self,
+        obj: Any,
+        component_type: str = "object",
+        grandchild_iid: str | None = None,
+    ) -> None:
+        """Rebuild and reselect a target inside the current object branch."""
+        self._object_cache[obj.object_id] = obj
+        root_iid = self._refresh_object_branch(obj.object_id, obj)
+        if root_iid is None:
+            return
+
+        target_iid = root_iid
+        if component_type != "object":
+            child_iid = f"{root_iid}:{component_type}"
+            if self.tree.exists(child_iid):
+                target_iid = child_iid
+                try:
+                    self.tree.item(root_iid, open=True)
+                except Exception:
+                    pass
+            if grandchild_iid is not None:
+                row_iid = f"{child_iid}:{grandchild_iid}"
+                if self.tree.exists(row_iid):
+                    target_iid = row_iid
+                    try:
+                        self.tree.item(child_iid, open=True)
+                    except Exception:
+                        pass
+
+        try:
+            self.tree.selection_set(target_iid)
+            self.tree.focus(target_iid)
+            self.tree.see(target_iid)
+        except Exception:
+            pass
+
+        self.current_object = obj
+        self.current_component_type = component_type
+        self._last_grandchild_iid = grandchild_iid
+        self._build_form_for(component_type, grandchild_iid)
+
+    def _format_save_error(self, exc: Exception) -> str:
+        message = str(exc).strip() or exc.__class__.__name__
+        if isinstance(exc, sqlite3.IntegrityError) and "FOREIGN KEY constraint failed" in message:
+            return (
+                "Foreign key constraint failed.\n\n"
+                "One or more referenced IDs do not exist in the database."
+            )
+        return message
 
     # ------------------------------------------------------------------
     # Context menu (right-click) core – delegated to subclasses via hooks
@@ -1584,7 +1637,7 @@ class BaseObjectEntityTab(ttk.Frame):
         self._populate_object_children(parent_iid, obj)
 
     # ------------------------------------------------------------------
-    def _on_save(self, persist: bool = True) -> None:
+    def _on_save(self, persist: bool = True) -> bool:
         """Apply current form values to the in-memory object and optionally persist.
 
         This method serves BOTH as:
@@ -1599,7 +1652,7 @@ class BaseObjectEntityTab(ttk.Frame):
         obj = getattr(self, 'current_object', None)
         component_type = getattr(self, 'current_component_type', None)
         if not obj or not component_type:
-            return
+            return False
         form_target = self._resolve_form_target(
             obj,
             component_type,
@@ -1608,7 +1661,7 @@ class BaseObjectEntityTab(ttk.Frame):
         if "message" in form_target:
             if persist:
                 self._show_message(str(form_target["message"]))
-            return
+            return False
 
         target_obj = form_target["target"]
         row_collection = form_target.get("collection")
@@ -1617,7 +1670,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         entry_widgets = getattr(self, '_entry_widgets', [])
         if not entry_widgets:
-            return
+            return False
 
         if row_collection is not None and key_field:
             try:
@@ -1785,13 +1838,31 @@ class BaseObjectEntityTab(ttk.Frame):
             pass
 
         # Persist if requested
+        active_row_key = None
+        if row_collection is not None:
+            try:
+                active_row_key = str(self._get_collection_row_key(row_collection, target_obj))
+            except Exception:
+                active_row_key = getattr(self, "_last_grandchild_iid", None)
         if persist:
+            save_snapshot = deepcopy(obj)
             # Persist changes through the service layer (to save to DB)
             try:
                 self._service.save(obj)
-                self._show_message('Saved successfully')
             except Exception as exc:  # pragma: no cover
-                self._show_message(f'Error saving: {exc}')
+                restored_obj = save_snapshot
+                self.current_object = restored_obj
+                self._object_cache[restored_obj.object_id] = restored_obj
+                self._has_unsaved_changes = True
+                self._focus_object_target(restored_obj, component_type, active_row_key)
+                self._update_unsaved_indicator()
+                try:
+                    messagebox.showerror("Save failed", self._format_save_error(exc))
+                except Exception:
+                    pass
+                return False
+
+            self._show_message('Saved successfully')
 
             # Remove from cache so next load is fresh from DB
             self._object_cache.pop(obj.object_id, None)
@@ -1855,6 +1926,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Update unsaved changes indicator after applying/persisting
         self._update_unsaved_indicator()
+        return True
 
     # ------------------------------------------------------------------
     def __load_relevant_object(self, parent_iid: str, obj_id: int) -> Any:
@@ -1891,11 +1963,9 @@ class BaseObjectEntityTab(ttk.Frame):
         unsaved indicator is cleared if everything is saved successfully.
         """
         # First, save the currently focused form (handles UI updates like renames)
-        try:
-            self._on_save(persist=True)
-        except Exception:
-            # _on_save already surfaces its own errors to the UI; continue to try saving the rest
-            pass
+        if not self._on_save(persist=True):
+            self._update_unsaved_indicator()
+            return
 
         # Then, persist any other dirty cached objects and queued deletions
         try:

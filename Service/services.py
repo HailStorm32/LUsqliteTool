@@ -717,6 +717,13 @@ class NPCService(BaseService):
         )
         physics.dirty = True
         npc.components["PhysicsComponent"] = physics
+        destructible = self._build_component_with_metadata_defaults(
+            DestructibleComponent,
+            "DestructibleComponent",
+            id=self._repo.generate_new_component_id(new_id, "DestructibleComponent"),
+        )
+        destructible.dirty = True
+        npc.components["DestructibleComponent"] = destructible
         self._ensure_component_row_collection(
             npc,
             "InventoryComponent",
@@ -782,6 +789,13 @@ class NPCService(BaseService):
         )
         physics.dirty = True
         npc.components["PhysicsComponent"] = physics
+        destructible = self._build_component_with_metadata_defaults(
+            DestructibleComponent,
+            "DestructibleComponent",
+            id=self._repo.generate_new_component_id(new_id, "DestructibleComponent"),
+        )
+        destructible.dirty = True
+        npc.components["DestructibleComponent"] = destructible
         self._ensure_component_row_collection(
             npc,
             "InventoryComponent",
