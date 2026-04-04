@@ -727,10 +727,6 @@ class BaseObjectEntityTab(ttk.Frame):
 
             # Read the current value from the target object
             value = getattr(target_obj, f.name)
-            if f.name == "row_id" and value is None and hasattr(target_obj, "display_key"):
-                # New LootMatrix rows do not have a persisted SQLite rowid yet.
-                # Show the temporary display key so the readonly field is not blank.
-                value = getattr(target_obj, "display_key")
 
             # Prepare a tkinter Variable to hold the editable value for this field.
             # We store (name, var, type) in self._entry_widgets so _on_save can read

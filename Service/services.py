@@ -783,6 +783,9 @@ class NPCService(BaseService):
     def _collect_loot_table_row_ids(self, npc: NPC) -> set[int]:
         return self._collect_row_values(npc, ("VendorLootTable", "DestructibleLootTable"), "id")
 
+    def _collect_loot_matrix_row_ids(self, npc: NPC) -> set[int]:
+        return self._collect_row_values(npc, ("VendorLootMatrix", "DestructibleLootMatrix"), "id")
+
     def _collect_currency_row_ids(self, npc: NPC) -> set[int]:
         return self._collect_row_values(npc, ("CurrencyTable",), "id")
 
@@ -1299,6 +1302,12 @@ class NPCService(BaseService):
             "LootMatrixRow",
             loot_matrix_index=loot_matrix_index,
             loot_table_index=loot_table_index,
+            id=self._reserve_next_int(
+                self._repo.generate_new_loot_matrix_row_id,
+                self._collect_loot_matrix_row_ids(npc),
+                label="loot_matrix_row_id",
+                object_id=npc.object_id,
+            ),
             rarity_table_index=rarity_table_index,
         )
         matrix_collection.rows.append(matrix_row)

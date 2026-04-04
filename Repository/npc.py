@@ -330,6 +330,9 @@ class NPCRepository(baseRepository):
     def generate_new_loot_table_index(self) -> int:
         return self._next_int("LootTableIndex", "LootTableIndex")
 
+    def generate_new_loot_matrix_row_id(self) -> int:
+        return self._next_int("LootMatrix", "id")
+
     def generate_new_loot_table_row_id(self) -> int:
         return self._next_int("LootTable", "id")
 
@@ -977,7 +980,7 @@ class NPCRepository(baseRepository):
             loot_matrix_indices = {int(vendor.loot_matrix_index)}
             matrix_rows = conn.execute(
                 """
-                SELECT rowid AS row_id, *
+                SELECT *
                 FROM LootMatrix
                 WHERE LootMatrixIndex=?
                 ORDER BY rowid
@@ -986,7 +989,6 @@ class NPCRepository(baseRepository):
             ).fetchall()
             vendor_matrix = [
                 LootMatrixRow(
-                    row_id=row["row_id"],
                     loot_matrix_index=row["LootMatrixIndex"],
                     loot_table_index=row["LootTableIndex"],
                     rarity_table_index=row["RarityTableIndex"],
@@ -1039,7 +1041,7 @@ class NPCRepository(baseRepository):
             loot_matrix_indices = {destructible.loot_matrix_index}
             rows = conn.execute(
                 """
-                SELECT rowid AS row_id, *
+                SELECT *
                 FROM LootMatrix
                 WHERE LootMatrixIndex=?
                 ORDER BY rowid
@@ -1048,7 +1050,6 @@ class NPCRepository(baseRepository):
             ).fetchall()
             matrix_rows = [
                 LootMatrixRow(
-                    row_id=row["row_id"],
                     loot_matrix_index=row["LootMatrixIndex"],
                     loot_table_index=row["LootTableIndex"],
                     rarity_table_index=row["RarityTableIndex"],
@@ -1256,7 +1257,7 @@ class NPCRepository(baseRepository):
                 conn.execute("DELETE FROM LootMatrix WHERE LootMatrixIndex=?", (key,))
             if self._has_linked_index(vendor.loot_matrix_index):
                 for row in matrix_collection.rows:
-                    result = conn.execute(
+                    conn.execute(
                         """
                         INSERT INTO LootMatrix (
                             LootMatrixIndex, LootTableIndex, RarityTableIndex, percent,
@@ -1276,7 +1277,6 @@ class NPCRepository(baseRepository):
                         ),
                     )
                     row.loot_matrix_index = vendor.loot_matrix_index
-                    row.row_id = result.lastrowid
                     row.dirty = False
             matrix_collection.loaded_keys = {int(vendor.loot_matrix_index)} if self._has_linked_index(vendor.loot_matrix_index) else set()
             matrix_collection.dirty = False
@@ -1302,7 +1302,7 @@ class NPCRepository(baseRepository):
                 conn.execute("DELETE FROM LootMatrix WHERE LootMatrixIndex=?", (key,))
             if destructible.loot_matrix_index is not None:
                 for row in matrix_collection.rows:
-                    result = conn.execute(
+                    conn.execute(
                         """
                         INSERT INTO LootMatrix (
                             LootMatrixIndex, LootTableIndex, RarityTableIndex, percent,
@@ -1322,7 +1322,6 @@ class NPCRepository(baseRepository):
                         ),
                     )
                     row.loot_matrix_index = destructible.loot_matrix_index
-                    row.row_id = result.lastrowid
                     row.dirty = False
             matrix_collection.loaded_keys = {destructible.loot_matrix_index} if destructible.loot_matrix_index is not None else set()
             matrix_collection.dirty = False

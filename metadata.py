@@ -169,7 +169,7 @@ component_field_metadata = {
         "faction":                     { "tip": "Primary faction id",                     "display_name": "",     "type": int,        "min": -1,        "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": -1 },
         "faction_list":                { "tip": "Faction list token string",              "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": False,  "advanced": False, "default": "-1" },
         "life":                        { "tip": "Health / life value",                    "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 1 },
-        "imagination":                 { "tip": "Imagination / mana value",               "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": None },
+        "imagination":                 { "tip": "Imagination / mana value",               "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0 },
         "loot_matrix_index":           { "tip": "Linked loot matrix index",               "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": True,   "advanced": True,  "default": None },
         "currency_index":              { "tip": "Linked currency table index",            "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": True,   "advanced": True,  "default": None },
         "level":                       { "tip": "NPC level",                              "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0 },
@@ -263,14 +263,13 @@ component_field_metadata = {
     # LootMatrix row metadata
     # ---------------------------------------------------------------
     "LootMatrixRow": {
-        "row_id":                { "tip": "SQLite row id",                            "display_name": "", "type": int,   "min": None, "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "loot_matrix_index":     { "tip": "Loot matrix index",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": 0 },
         "loot_table_index":      { "tip": "Loot table index",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": 0 },
         "rarity_table_index":    { "tip": "Rarity table index",                       "display_name": "", "type": int,   "min": 2,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 2 },
         "percent":               { "tip": "Drop chance percentage",                    "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": False, "default": 1.0 },
         "min_to_drop":           { "tip": "Minimum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 0 },
         "max_to_drop":           { "tip": "Maximum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },
-        "id":                    { "tip": "Associated object id",                      "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
+        "id":                    { "tip": "Loot matrix row id",                        "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
         "flag_id":               { "tip": "Required flag id",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
         "gate_version":          { "tip": "Version gate string",                      "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "dirty":                 { "tip": "Internal dirty flag (not editable)",       "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },

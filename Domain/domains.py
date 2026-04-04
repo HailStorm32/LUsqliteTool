@@ -374,7 +374,6 @@ class MissionNPCComponentRow:
 
 @dataclass
 class LootMatrixRow:
-    row_id: Optional[int] = None
     loot_matrix_index: int = 0
     loot_table_index: int = 0
     rarity_table_index: int = 1
@@ -388,14 +387,14 @@ class LootMatrixRow:
 
     @property
     def ui_key(self) -> str | int:
-        if self.row_id is not None:
-            return self.row_id
+        if self.id is not None:
+            return self.id
         return f"new-{self.loot_table_index}"
 
     @property
     def display_key(self) -> int:
-        if self.row_id is not None:
-            return self.row_id
+        if self.id is not None:
+            return self.id
         return self.loot_table_index
 
 
