@@ -97,6 +97,21 @@ class NPCTab(BaseObjectEntityTab):
     def _get_component_display_name(self, component_type: str) -> str:
         return self.COMPONENT_DISPLAY_NAMES.get(component_type, component_type)
 
+    def _format_collection_row_text(self, component: Any, row: Any) -> str:
+        prefix = self._get_component_label_prefix(component)
+
+        if prefix == "LootMatrix":
+            loot_matrix_index = getattr(row, "loot_matrix_index", None)
+            if loot_matrix_index is not None:
+                return f"LootMatrix {loot_matrix_index}"
+
+        if prefix == "LootTable":
+            item_id = getattr(row, "itemid", None)
+            if item_id is not None:
+                return f"LootTable Item: {item_id}"
+
+        return super()._format_collection_row_text(component, row)
+
     def _build_widgets(self) -> None:
         paned = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True)
