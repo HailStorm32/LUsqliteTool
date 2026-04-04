@@ -1092,27 +1092,14 @@ class NPCService(BaseService):
             DestructibleComponent,
             "DestructibleComponent",
             id=self._repo.generate_new_component_id(npc.object_id, "DestructibleComponent"),
-            loot_matrix_index=self._reserve_next_int(
-                self._repo.generate_new_loot_matrix_index,
-                self._collect_loot_matrix_indices(npc),
-                label="loot_matrix_index",
-                object_id=npc.object_id,
-            ),
-            currency_index=self._reserve_next_int(
-                self._repo.generate_new_currency_index,
-                self._collect_currency_indices(npc),
-                label="currency_index",
-                object_id=npc.object_id,
-            ),
         )
         comp.dirty = True
         npc.components["DestructibleComponent"] = comp
-        self._ensure_loot_matrix_index_row(npc, "destructible", int(comp.loot_matrix_index or 0))
         npc.components["DestructibleLootMatrix"] = RowCollection(
             rows=[],
             key_field="ui_key",
             label_prefix="LootMatrix",
-            loaded_keys={comp.loot_matrix_index},
+            loaded_keys={comp.loot_matrix_index} if self._has_linked_index(comp.loot_matrix_index) else set(),
             dirty=True,
         )
         npc.components["DestructibleLootTableIndex"] = RowCollection(
@@ -1133,7 +1120,7 @@ class NPCService(BaseService):
             rows=[],
             key_field="id",
             label_prefix="CurrencyTable",
-            loaded_keys={comp.currency_index},
+            loaded_keys={comp.currency_index} if self._has_linked_index(comp.currency_index) else set(),
             dirty=True,
         )
         return comp
