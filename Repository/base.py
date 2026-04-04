@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+from typing import Any, Callable
 from Domain.domains import *
 from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 
@@ -12,6 +13,77 @@ def _color_id(x: Optional[int | ColorType]) -> Optional[int]:
     if isinstance(x, ColorType):
         return int(x)
     return x  # Already an int or None
+
+
+def _rgb_component_to_int(value: Any) -> int:
+    """Normalize SQLite REAL color components to 0-255 integers."""
+    try:
+        numeric = float(value)
+    except Exception:
+        numeric = 0.0
+    if numeric <= 1.0:
+        numeric *= 255.0
+    return max(0, min(255, int(round(numeric))))
+
+
+def _rgb_to_hex(red: Any, green: Any, blue: Any) -> str:
+    return "#{:02X}{:02X}{:02X}".format(
+        _rgb_component_to_int(red),
+        _rgb_component_to_int(green),
+        _rgb_component_to_int(blue),
+    )
+
+
+def _build_icon_lookup_option(row: sqlite3.Row) -> dict[str, Any]:
+    icon_name = str(row["IconName"] or "").strip()
+    icon_path = str(row["IconPath"] or "").strip()
+    label = icon_name or icon_path
+    detail = icon_path if icon_path and icon_path != label else ""
+    return {
+        "id": row["IconID"],
+        "label": label,
+        "detail": detail,
+    }
+
+
+def _build_torso_lookup_option(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["ID"],
+        "label": str(row["High_path"] or "").strip(),
+    }
+
+
+def _build_brick_color_lookup_option(row: sqlite3.Row) -> dict[str, Any]:
+    red = _rgb_component_to_int(row["red"])
+    green = _rgb_component_to_int(row["green"])
+    blue = _rgb_component_to_int(row["blue"])
+    return {
+        "id": row["id"],
+        "label": str(row["description"] or "").strip(),
+        "detail": f"RGB({red}, {green}, {blue})",
+        "preview_hex": _rgb_to_hex(row["red"], row["green"], row["blue"]),
+        "preview_text": f"RGB({red}, {green}, {blue})",
+    }
+
+
+LOOKUP_SPECS: dict[str, dict[str, Any]] = {
+    # Central lookup registry for linked-table editor controls.
+    # Adding a future lookup should only require:
+    # 1. a metadata `lookup` entry on the field, and
+    # 2. one spec here describing how to query/format the linked rows.
+    "icons": {
+        "query": "SELECT IconID, IconName, IconPath FROM Icons ORDER BY IconID",
+        "builder": _build_icon_lookup_option,
+    },
+    "minifig_torsos": {
+        "query": "SELECT ID, High_path FROM MinifigDecals_Torsos ORDER BY ID",
+        "builder": _build_torso_lookup_option,
+    },
+    "brick_colors": {
+        "query": "SELECT id, description, red, green, blue, alpha FROM BrickColors ORDER BY id",
+        "builder": _build_brick_color_lookup_option,
+    },
+}
 
 class baseRepository:
     def __init__(self, db_file: str):
@@ -90,6 +162,20 @@ class baseRepository:
                 params += (limit,)
             rows = conn.execute(query, params).fetchall()
             return [{"id": row["id"], "name": row["name"]} for row in rows]
+        finally:
+            conn.close()
+
+    def get_lookup_options(self, lookup_name: str) -> list[dict[str, Any]]:
+        """Return generic linked-table lookup options for editor dropdowns."""
+        spec = LOOKUP_SPECS.get(str(lookup_name))
+        if spec is None:
+            return []
+
+        conn = self._connect_to_db()
+        try:
+            rows = conn.execute(str(spec["query"])).fetchall()
+            builder: Callable[[sqlite3.Row], dict[str, Any]] = spec["builder"]
+            return [builder(row) for row in rows]
         finally:
             conn.close()
 

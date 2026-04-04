@@ -259,9 +259,59 @@ class BaseObjectEntityTab(ttk.Frame):
         return list(self._lookup_cache.get(lookup_name, []))
 
     def _format_lookup_label(self, option: dict[str, Any]) -> str:
+        parts: list[str] = []
         ident = option.get("id", "")
         label = str(option.get("label") or "").strip()
-        return f"{ident} | {label}" if label else str(ident)
+        detail = str(option.get("detail") or "").strip()
+        if ident not in (None, ""):
+            parts.append(str(ident))
+        if label:
+            parts.append(label)
+        if detail:
+            parts.append(detail)
+        return " | ".join(parts)
+
+    def _get_lookup_search_text(self, option: dict[str, Any]) -> str:
+        return " ".join(
+            str(option.get(key) or "").strip()
+            for key in ("id", "label", "detail", "preview_text")
+        ).lower()
+
+    def _normalize_lookup_filter_text(self, lookup_name: str, search_text: Any) -> str:
+        text = str(search_text or "").strip()
+        if not text:
+            return ""
+
+        lowered = text.lower()
+        for option in self._get_lookup_options(lookup_name):
+            if self._format_lookup_label(option).strip().lower() == lowered:
+                # If the field currently contains an exact selected label,
+                # opening the dropdown should still show the full option set.
+                return ""
+        return text
+
+    def _filter_lookup_options(self, lookup_name: str, search_text: Any) -> list[dict[str, Any]]:
+        options = self._get_lookup_options(lookup_name)
+        term = self._normalize_lookup_filter_text(lookup_name, search_text).lower()
+        if not term:
+            return options
+        return [option for option in options if term in self._get_lookup_search_text(option)]
+
+    def _resolve_lookup_option(self, lookup_name: str, selection: Any) -> dict[str, Any] | None:
+        try:
+            option_id = self._parse_lookup_value(selection)
+        except Exception:
+            return None
+        for option in self._get_lookup_options(lookup_name):
+            if option.get("id") == option_id:
+                return option
+        return None
+
+    def _lookup_supports_color_preview(self, lookup_name: str) -> bool:
+        return any(
+            isinstance(option.get("preview_hex"), str) and str(option.get("preview_hex")).strip()
+            for option in self._get_lookup_options(lookup_name)
+        )
 
     def _build_lookup_display(self, lookup_name: str, current_value: Any) -> tuple[list[str], str]:
         options = self._get_lookup_options(lookup_name)
@@ -298,6 +348,30 @@ class BaseObjectEntityTab(ttk.Frame):
             return int(text)
         except Exception:
             raise ValueError(f"'{text}' is not a valid lookup id")
+
+    def _refresh_lookup_combobox_values(self, combo: ttk.Combobox, lookup_name: str, search_text: Any) -> None:
+        values = [""] + [self._format_lookup_label(option) for option in self._filter_lookup_options(lookup_name, search_text)]
+        try:
+            combo.configure(values=values)
+        except Exception:
+            pass
+
+    def _bind_lookup_combobox_search(self, combo: ttk.Combobox, lookup_name: str, var: tk.Variable) -> None:
+        def _refresh(_event=None) -> None:
+            self._refresh_lookup_combobox_values(combo, lookup_name, var.get())
+
+        try:
+            combo.configure(postcommand=lambda: self._refresh_lookup_combobox_values(combo, lookup_name, var.get()))
+        except Exception:
+            pass
+        try:
+            combo.bind("<KeyRelease>", _refresh, add=True)
+        except Exception:
+            pass
+        try:
+            combo.bind("<FocusIn>", _refresh, add=True)
+        except Exception:
+            pass
 
     def _sync_collection_row_node(self, obj_id: int, component_type: str, component: Any, original_key: Any, row: Any) -> None:
         """Keep collection-node identity stable when the edited row key changes."""
@@ -735,10 +809,12 @@ class BaseObjectEntityTab(ttk.Frame):
 
             # Boolean fields get a Checkbutton bound to a BooleanVar
             if lookup_name:
-                options, display = self._build_lookup_display(str(lookup_name), value)
+                lookup_key = str(lookup_name)
+                options, display = self._build_lookup_display(lookup_key, value)
                 widget_width = self._get_lookup_widget_width(options)
                 var = tk.StringVar(value=display)
-                self._field_lookup_names[f.name] = str(lookup_name)
+                combo: ttk.Combobox | None = None
+                self._field_lookup_names[f.name] = lookup_key
                 if readonly:
                     entry_ro = ttk.Entry(inner, textvariable=var, width=widget_width, state='readonly')
                     entry_ro.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
@@ -748,9 +824,33 @@ class BaseObjectEntityTab(ttk.Frame):
                     combo.grid(row=row, column=1, sticky=tk.W, padx=2, pady=2)
                     widget_for_tooltip = combo
                     try:
+                        self._bind_lookup_combobox_search(combo, lookup_key, var)
+                    except Exception:
+                        pass
+                    try:
                         self._attach_combobox_wheel_passthrough(combo, canvas)
                     except Exception:
                         pass
+
+                if self._lookup_supports_color_preview(lookup_key):
+                    swatch, preview_label = self._create_color_swatch(inner, row)
+                    self._update_lookup_color_preview(combo, var, lookup_key, swatch, preview_label)
+                    try:
+                        var.trace_add(
+                            'write',
+                            lambda *_args, c=combo, v=var, l=lookup_key, s=swatch, p=preview_label: self._update_lookup_color_preview(c, v, l, s, p),
+                        )
+                    except Exception:
+                        pass
+                    if combo is not None:
+                        try:
+                            combo.bind(
+                                '<<ComboboxSelected>>',
+                                lambda _e, c=combo, v=var, l=lookup_key, s=swatch, p=preview_label: self._update_lookup_color_preview(c, v, l, s, p),
+                            )
+                        except Exception:
+                            pass
+
                 try:
                     self._attach_copy_context_menu(
                         widget_for_tooltip,
@@ -1540,6 +1640,40 @@ class BaseObjectEntityTab(ttk.Frame):
             pass
 
     # ------------------------------------------------------------------
+    def _update_lookup_color_preview(
+        self,
+        combo: ttk.Combobox | None,
+        var: tk.Variable,
+        lookup_name: str,
+        swatch: tk.Widget,
+        preview_label: ttk.Label,
+    ) -> None:
+        """Update a lookup-backed color preview from the current selection."""
+        try:
+            selection = combo.get() if combo is not None else ''
+        except Exception:
+            selection = ''
+        if not selection:
+            try:
+                selection = var.get()
+            except Exception:
+                selection = ''
+
+        option = self._resolve_lookup_option(lookup_name, selection)
+        color_hex = str(option.get('preview_hex') or '#FFFFFF') if option else '#FFFFFF'
+        preview_text = ''
+        if option is not None:
+            preview_text = str(option.get('preview_text') or option.get('detail') or '')
+
+        try:
+            swatch.configure(background=color_hex)
+        except Exception:
+            pass
+        try:
+            preview_label.configure(text=preview_text)
+        except Exception:
+            pass
+
     def _refresh_form(self) -> None:
         """Rebuild the current form (used when toggling advanced fields)."""
         if getattr(self, "current_component_type", None):

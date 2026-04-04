@@ -298,29 +298,6 @@ class NPCRepository(baseRepository):
         finally:
             conn.close()
 
-    def get_lookup_options(self, lookup_name: str) -> list[dict[str, Any]]:
-        conn = self._connect_to_db()
-        try:
-            if lookup_name == "icons":
-                rows = conn.execute(
-                    "SELECT IconID, IconName, IconPath FROM Icons ORDER BY IconID"
-                ).fetchall()
-                return [
-                    {
-                        "id": row["IconID"],
-                        "label": (row["IconName"] or row["IconPath"] or ""),
-                    }
-                    for row in rows
-                ]
-            if lookup_name == "minifig_torsos":
-                rows = conn.execute(
-                    "SELECT ID, High_path FROM MinifigDecals_Torsos ORDER BY ID"
-                ).fetchall()
-                return [{"id": row["ID"], "label": row["High_path"] or ""} for row in rows]
-            return []
-        finally:
-            conn.close()
-
     def generate_new_mission_id(self) -> int:
         return self._next_int("Missions", "id")
 
