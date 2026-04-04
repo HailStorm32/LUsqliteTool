@@ -523,11 +523,12 @@ class ItemService(BaseService):
         """Create a blank ObjectSkillRow for the given object id with a unique placeholder id."""
         used_ids = used_ids or set()
         sid = self._next_blank_skill_id(used_ids)
-        return ObjectSkillRow(
+        return self._build_component_with_metadata_defaults(
+            ObjectSkillRow,
+            "ObjectSkillRow",
             object_Template=object_id,
             skill_id=sid,
             cast_on_type=1,
-            ai_combat_weight=None,
         )
 
     def add_blank_skill(self, item: Item) -> ObjectSkillRow:
@@ -817,7 +818,11 @@ class NPCService(BaseService):
                 collection.dirty = True
             collection.rows = [existing]
             return existing
-        row = LootMatrixIndexRow(loot_matrix_index=loot_matrix_index, in_npc_editor=True)
+        row = self._build_component_with_metadata_defaults(
+            LootMatrixIndexRow,
+            "LootMatrixIndexRow",
+            loot_matrix_index=loot_matrix_index,
+        )
         collection.rows = [row]
         collection.dirty = True
         return row
@@ -830,7 +835,11 @@ class NPCService(BaseService):
         )
         if isinstance(existing, LootTableIndexRow):
             return existing
-        row = LootTableIndexRow(loot_table_index=loot_table_index)
+        row = self._build_component_with_metadata_defaults(
+            LootTableIndexRow,
+            "LootTableIndexRow",
+            loot_table_index=loot_table_index,
+        )
         collection.rows.append(row)
         collection.dirty = True
         return row
@@ -1146,7 +1155,12 @@ class NPCService(BaseService):
         candidate = INT_32_MAX
         while candidate in used and candidate > 1:
             candidate -= 1
-        row = InventoryComponentRow(id=component_id, itemid=candidate, count=1, equip=False)
+        row = self._build_component_with_metadata_defaults(
+            InventoryComponentRow,
+            "InventoryComponentRow",
+            id=component_id,
+            itemid=candidate,
+        )
         collection.rows.append(row)
         collection.dirty = True
         return row
@@ -1171,10 +1185,17 @@ class NPCService(BaseService):
             object_id=npc.object_id,
         )
         component_id = int(mission_collection.component_id or npc.object_id)
-        mission_row = MissionNPCComponentRow(id=component_id, mission_id=mission_id)
+        mission_row = self._build_component_with_metadata_defaults(
+            MissionNPCComponentRow,
+            "MissionNPCComponentRow",
+            id=component_id,
+            mission_id=mission_id,
+        )
         mission_collection.rows.append(mission_row)
         missions.rows.append(
-            MissionRow(
+            self._build_component_with_metadata_defaults(
+                MissionRow,
+                "MissionRow",
                 id=mission_id,
                 offer_object_id=npc.object_id,
                 target_object_id=npc.object_id,
@@ -1182,7 +1203,13 @@ class NPCService(BaseService):
                 localize=True,
             )
         )
-        mission_text.rows.append(MissionTextRow(id=mission_id))
+        mission_text.rows.append(
+            self._build_component_with_metadata_defaults(
+                MissionTextRow,
+                "MissionTextRow",
+                id=mission_id,
+            )
+        )
 
         mission_collection.dirty = True
         missions.dirty = True
@@ -1195,7 +1222,9 @@ class NPCService(BaseService):
     def add_task_row(self, npc: NPC) -> MissionTaskRow:
         mission_id = self._get_or_create_primary_mission_id(npc)
         collection = self._ensure_row_collection(npc, "MissionTasks", key_field="uid", label_prefix="Task")
-        row = MissionTaskRow(
+        row = self._build_component_with_metadata_defaults(
+            MissionTaskRow,
+            "MissionTaskRow",
             id=mission_id,
             uid=self._reserve_next_int(
                 self._repo.generate_new_task_uid,
@@ -1211,15 +1240,15 @@ class NPCService(BaseService):
     def add_email_row(self, npc: NPC) -> MissionEmailRow:
         mission_id = self._get_or_create_primary_mission_id(npc)
         collection = self._ensure_row_collection(npc, "MissionEmail", key_field="id", label_prefix="Email")
-        row = MissionEmailRow(
+        row = self._build_component_with_metadata_defaults(
+            MissionEmailRow,
+            "MissionEmailRow",
             id=self._reserve_next_int(
                 self._repo.generate_new_mission_email_id,
                 self._collect_mission_email_ids(npc),
                 label="mission_email_id",
                 object_id=npc.object_id,
             ),
-            message_type=0,
-            notification_group=0,
             mission_id=mission_id,
         )
         collection.rows.append(row)
@@ -1242,8 +1271,9 @@ class NPCService(BaseService):
         return matrix_index_collection, matrix_collection, table_index_collection, table_collection, loot_matrix_index
 
     def _create_loot_table_row(self, npc: NPC, loot_table_index: int) -> LootTableRow:
-        return LootTableRow(
-            itemid=INT_32_MAX,
+        return self._build_component_with_metadata_defaults(
+            LootTableRow,
+            "LootTableRow",
             loot_table_index=loot_table_index,
             id=self._reserve_next_int(
                 self._repo.generate_new_loot_table_row_id,
@@ -1264,13 +1294,12 @@ class NPCService(BaseService):
         rarity_table_index = int(self._repo.get_default_rarity_table_index())
         self._ensure_loot_table_index_row(npc, family, loot_table_index)
         table_index_collection.dirty = True
-        matrix_row = LootMatrixRow(
+        matrix_row = self._build_component_with_metadata_defaults(
+            LootMatrixRow,
+            "LootMatrixRow",
             loot_matrix_index=loot_matrix_index,
             loot_table_index=loot_table_index,
             rarity_table_index=rarity_table_index,
-            percent=1.0,
-            min_to_drop=0,
-            max_to_drop=1,
         )
         matrix_collection.rows.append(matrix_row)
         matrix_collection.dirty = True
@@ -1334,11 +1363,10 @@ class NPCService(BaseService):
             )
             destructible.dirty = True
         collection = self._ensure_row_collection(npc, "CurrencyTable", key_field="id", label_prefix="CurrencyTable")
-        row = CurrencyTableRow(
+        row = self._build_component_with_metadata_defaults(
+            CurrencyTableRow,
+            "CurrencyTableRow",
             currency_index=destructible.currency_index,
-            npcminlevel=0,
-            minvalue=0,
-            maxvalue=0,
             id=self._reserve_next_int(
                 self._repo.generate_new_currency_row_id,
                 self._collect_currency_row_ids(npc),

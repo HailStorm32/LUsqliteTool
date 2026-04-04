@@ -72,7 +72,7 @@ component_field_metadata = {
         "id":                          { "tip": "Primary key / component id",            "display_name": "",    "type": int,        "min": 1,        "max": INT_32_MAX,    "readonly": True,   "advanced": False , "default": None },
 
         # Assets
-        "render_asset":                { "tip": "Path or identifier of render asset",    "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False, "default": { "vendor": r"animations\minifig\mf_vendor.kfm", "mission": r"animations\minifig\mf_mission-givers.kfm" } },
+        "render_asset":                { "tip": "Path or identifier of render asset",    "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False, "default": { "vendor": r"animations\\minifig\\mf_vendor.kfm", "mission": r"animations\\minifig\\mf_mission-givers.kfm" } },
         "icon_asset":                  { "tip": "Icon asset reference",                  "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False , "default": None },
         "icon_id":                     { "tip": "Numeric icon id",                       "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "icons", "default": None },
         "shader_id":                   { "tip": "Shader identifier",                     "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": 14 },
@@ -289,7 +289,7 @@ component_field_metadata = {
     # LootTable row metadata
     # ---------------------------------------------------------------
     "LootTableRow": {
-        "itemid":                { "tip": "Item LOT id",                              "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "itemid":                { "tip": "Item LOT id",                              "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 6861 },
         "loot_table_index":      { "tip": "Loot table index",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "id":                    { "tip": "Loot table row id",                        "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "mission_drop":          { "tip": "Mission-only drop",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": False, "default": False },
