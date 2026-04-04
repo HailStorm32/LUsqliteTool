@@ -212,3 +212,5 @@ logs/
 *.png
 .vscode/
 *.bak
+*.sqlite-*
+client_test.bat
