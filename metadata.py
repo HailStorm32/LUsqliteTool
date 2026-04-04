@@ -143,7 +143,7 @@ component_field_metadata = {
     # ---------------------------------------------------------------
     "PhysicsComponent": {
         "id":                          { "tip": "Primary key / component id",            "display_name": "",     "type": int,        "min": 1,         "max": INT_32_MAX,    "readonly": True,   "advanced": False, "default": None },
-            "static":                      { "tip": "Static physics flag / weight value",     "display_name": "",     "type": float,      "min": 0.0,       "max": FLOAT_32_MAX,  "readonly": False,  "advanced": False, "default": None },
+            "static":                      { "tip": "Static physics flag / weight value",     "display_name": "",     "type": float,      "min": 0.0,       "max": FLOAT_32_MAX,  "readonly": False,  "advanced": False, "default": 1.0 },
             "physics_asset":               { "tip": "Physics asset path or identifier",       "display_name": "",     "type": str,        "min": None,      "max": None,          "readonly": False,  "advanced": False, "default": None },
             "jump":                        { "tip": "Jump strength",                          "display_name": "",     "type": float,      "min": 0.0,       "max": FLOAT_32_MAX,  "readonly": False,  "advanced": False, "default": None },
             "doublejump":                  { "tip": "Double-jump strength",                   "display_name": "",     "type": float,      "min": 0.0,       "max": FLOAT_32_MAX,  "readonly": False,  "advanced": False, "default": None },

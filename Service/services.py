@@ -878,7 +878,7 @@ class NPCService(BaseService):
     def create_default_vendor_npc(self, object_id: int | None = None) -> NPC:
         new_id = self._resolve_new_object_id(object_id)
         log.info("Creating default vendor NPC object_id=%s", new_id)
-        npc = NPC(id=new_id, type=ObjectTypes.NPC_2)
+        npc = NPC(id=new_id, type=ObjectTypes.NPC)
         npc.dirty = True
         self._apply_metadata_defaults(npc, "GameObject")
         render = self._build_component_with_metadata_defaults(
@@ -952,7 +952,7 @@ class NPCService(BaseService):
     def create_default_mission_npc(self, object_id: int | None = None) -> NPC:
         new_id = self._resolve_new_object_id(object_id)
         log.info("Creating default mission NPC object_id=%s", new_id)
-        npc = NPC(id=new_id, type=ObjectTypes.NPC_2)
+        npc = NPC(id=new_id, type=ObjectTypes.NPC)
         npc.dirty = True
         self._apply_metadata_defaults(npc, "GameObject")
         render = self._build_component_with_metadata_defaults(
