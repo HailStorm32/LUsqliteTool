@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import tkinter as tk
@@ -7,7 +7,7 @@ from typing import Any
 
 from Domain.domains import RowCollection
 from Service.services import NPCService
-from gui import BaseObjectEntityTab
+from .gui import BaseObjectEntityTab
 
 log = logging.getLogger(__name__)
 
@@ -844,3 +844,4 @@ class NPCTab(BaseObjectEntityTab):
             messagebox.showinfo("Undo", "Local deletes have been undone.")
         except Exception:
             pass
+
