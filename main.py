@@ -86,7 +86,7 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Pull rarity values from DB (RarityTable) for use in loot matrix instead of hardcoding
+
 
 
 DestructableCompoent -  DeathBehavior mapping
