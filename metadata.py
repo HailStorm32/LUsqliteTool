@@ -1,6 +1,33 @@
 INT_32_MAX = 2_147_483_647
 FLOAT_32_MAX = 3.4028235e+38
 
+# Field metadata drives both form generation and default-value application.
+# For linked-table fields, add a "lookup" dict to the field metadata. The GUI
+# will render that field as a searchable dropdown, still allow manual id entry,
+# and save the selected/typed foreign-key id back into the row.
+#
+# Required lookup keys:
+#   "table":  SQLite table name to query
+#   "column": primary/display id column returned to the edited field
+#
+# Optional lookup keys:
+#   "label_columns":  columns used to build the main visible text
+#   "detail_columns": extra columns appended to the visible text/search text
+#   "order_by":       sort columns for the dropdown (defaults to "column")
+#   "preview":        currently supports RGB swatches:
+#                     { "type": "rgb", "red": "...", "green": "...", "blue": "..." }
+#
+# Example:
+#   "lookup": {
+#       "table": "BrickColors",
+#       "column": "id",
+#       "label_columns": ["description"],
+#       "order_by": ["id"],
+#       "preview": { "type": "rgb", "red": "red", "green": "green", "blue": "blue" },
+#   }
+#
+# The metadata "default" remains the raw value stored on the row. For lookup
+# fields that means the foreign-key id, not the rendered label.
 component_field_metadata = {
     # ---------------------------------------------------------------
     # ItemComponent metadata
@@ -32,7 +59,7 @@ component_field_metadata = {
 
         # Stack / appearance
         "stack_size":                 { "tip": "Max stack size",                     "display_name": "",     "type": int,        "min": 1,       "max": 256,            "readonly": False,  "advanced": False   , "default": None },
-        "color1":                     { "tip": "Primary BrickColor id",              "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "lookup": "brick_colors", "default": 10 },
+        "color1":                     { "tip": "Primary BrickColor id",              "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "lookup": { "table": "BrickColors", "column": "id", "label_columns": ["description"], "order_by": ["id"], "preview": { "type": "rgb", "red": "red", "green": "green", "blue": "blue" } }, "default": 10 },
         "decal":                      { "tip": "Decal id (optional)",                "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "default": None },
         "offset_group_id":            { "tip": "Offset group id",                    "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "default": None },
         "build_types":                { "tip": "Bitmask build types",                "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "default": None },
@@ -66,7 +93,7 @@ component_field_metadata = {
 
     # ---------------------------------------------------------------
     # RenderComponent visual representation metadata
-    # ---------------------------------------------------------------2097200
+    # ---------------------------------------------------------------
     "RenderComponent": {
         # Core identity
         "id":                          { "tip": "Primary key / component id",            "display_name": "",    "type": int,        "min": 1,        "max": INT_32_MAX,    "readonly": True,   "advanced": False , "default": None },
@@ -74,7 +101,7 @@ component_field_metadata = {
         # Assets
         "render_asset":                { "tip": "Path or identifier of render asset",    "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False, "default": { "vendor": r"animations\\minifig\\mf_vendor.kfm", "mission": r"animations\\minifig\\mf_mission-givers.kfm" } },
         "icon_asset":                  { "tip": "Icon asset reference",                  "display_name": "",    "type": str,        "min": None,     "max": None,          "readonly": False,  "advanced": False , "default": None },
-        "icon_id":                     { "tip": "Numeric icon id",                       "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "icons", "default": None },
+        "icon_id":                     { "tip": "Numeric icon id",                       "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": { "table": "Icons", "column": "IconID", "label_columns": ["IconName", "IconPath"], "detail_columns": ["IconPath"], "order_by": ["IconID"] }, "default": None },
         "shader_id":                   { "tip": "Shader identifier",                     "display_name": "",    "type": int,        "min": 0,        "max": INT_32_MAX,    "readonly": False,  "advanced": True  , "default": 14 },
 
         # Effects (optional int slots)
@@ -124,11 +151,11 @@ component_field_metadata = {
     "MinifigComponent": {
         "id":                          { "tip": "Primary key / component id",            "display_name": "",     "type": int,        "min": 1,         "max": INT_32_MAX,    "readonly": True,   "advanced": False , "default": None },
         "head":                        { "tip": "Head style id",                         "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0  },
-        "chest":                       { "tip": "Chest color id",                        "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "brick_colors", "default": 78 },
-        "legs":                        { "tip": "Leg color id",                          "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "brick_colors", "default": 13 },
+        "chest":                       { "tip": "Chest color id",                        "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": { "table": "BrickColors", "column": "id", "label_columns": ["description"], "order_by": ["id"], "preview": { "type": "rgb", "red": "red", "green": "green", "blue": "blue" } }, "default": 78 },
+        "legs":                        { "tip": "Leg color id",                          "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": { "table": "BrickColors", "column": "id", "label_columns": ["description"], "order_by": ["id"], "preview": { "type": "rgb", "red": "red", "green": "green", "blue": "blue" } }, "default": 13 },
         "hairstyle":                   { "tip": "Hair style id",                         "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 2  },
-        "haircolor":                   { "tip": "Hair color id",                         "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "brick_colors", "default": 9  },
-        "chestdecal":                  { "tip": "Chest decal id",                        "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": "minifig_torsos", "default": 33 },
+        "haircolor":                   { "tip": "Hair color id",                         "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": { "table": "BrickColors", "column": "id", "label_columns": ["description"], "order_by": ["id"], "preview": { "type": "rgb", "red": "red", "green": "green", "blue": "blue" } }, "default": 9  },
+        "chestdecal":                  { "tip": "Chest decal id",                        "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "lookup": { "table": "MinifigDecals_Torsos", "column": "ID", "label_columns": ["High_path"], "order_by": ["ID"] }, "default": 33 },
         "headcolor":                   { "tip": "Head color id",                         "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0  },
         "lefthand":                    { "tip": "Left hand item id",                     "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0  },
         "righthand":                   { "tip": "Right hand item id",                    "display_name": "",     "type": int,        "min": 0,         "max": INT_32_MAX,    "readonly": False,  "advanced": False, "default": 0  },
@@ -265,7 +292,7 @@ component_field_metadata = {
     "LootMatrixRow": {
         "loot_matrix_index":     { "tip": "Loot matrix index",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": 0 },
         "loot_table_index":      { "tip": "Loot table index",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": 0 },
-        "rarity_table_index":    { "tip": "Rarity table index",                       "display_name": "", "type": int,   "min": 2,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 2 },
+        "rarity_table_index":    { "tip": "Rarity table index",                       "display_name": "", "type": int,   "min": 2,    "max": INT_32_MAX, "readonly": False, "advanced": True, "lookup": { "table": "RarityTableIndex", "column": "RarityTableIndex", "order_by": ["RarityTableIndex"] }, "default": 2 },
         "percent":               { "tip": "Drop chance percentage",                    "display_name": "", "type": float, "min": 0.0,  "max": FLOAT_32_MAX, "readonly": False, "advanced": False, "default": 1.0 },
         "min_to_drop":           { "tip": "Minimum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 0 },
         "max_to_drop":           { "tip": "Maximum items to drop",                    "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": 1 },
@@ -360,7 +387,7 @@ component_field_metadata = {
         "reward_item4_repeat_count": { "tip": "Repeatable reward item 4 count",       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 1 },
         "time_limit":            { "tip": "Mission time limit",                        "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
         "is_mission":            { "tip": "Is mission (vs achievement)",              "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
-        "mission_icon_id":       { "tip": "Mission icon id",                          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "mission_icon_id":       { "tip": "Mission icon id",                          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": { "table": "Icons", "column": "IconID", "label_columns": ["IconName", "IconPath"], "detail_columns": ["IconPath"], "order_by": ["IconID"] }, "default": None },
         "prereq_mission_id":     { "tip": "Prerequisite mission ids",                  "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
         "in_motd":               { "tip": "Show in MOTD",                              "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": False },
@@ -387,9 +414,9 @@ component_field_metadata = {
         "target_value":          { "tip": "Task target value",                         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
         "task_param1":           { "tip": "Task parameter 1",                          "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "large_task_icon":       { "tip": "Large task icon asset",                     "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
-        "icon_id":               { "tip": "Task icon id",                             "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "icon_id":               { "tip": "Task icon id",                             "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": { "table": "Icons", "column": "IconID", "label_columns": ["IconName", "IconPath"], "detail_columns": ["IconPath"], "order_by": ["IconID"] }, "default": None },
         "uid":                   { "tip": "Task unique id",                            "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
-        "large_task_icon_id":    { "tip": "Large task icon id",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "large_task_icon_id":    { "tip": "Large task icon id",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": { "table": "Icons", "column": "IconID", "label_columns": ["IconName", "IconPath"], "detail_columns": ["IconPath"], "order_by": ["IconID"] }, "default": None },
         "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
         "gate_version":          { "tip": "Version gate string",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "dirty":                 { "tip": "Internal dirty flag (not editable)",        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": True,  "advanced": True,  "default": None },
@@ -403,7 +430,7 @@ component_field_metadata = {
         "story_icon":            { "tip": "Story icon asset",                          "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "mission_icon":          { "tip": "Mission icon asset",                        "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "offer_npc_icon":        { "tip": "Offer NPC icon asset",                      "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
-        "icon_id":               { "tip": "Mission text icon id",                     "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "icon_id":               { "tip": "Mission text icon id",                     "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": { "table": "Icons", "column": "IconID", "label_columns": ["IconName", "IconPath"], "detail_columns": ["IconPath"], "order_by": ["IconID"] }, "default": None },
         "state_1_anim":          { "tip": "State 1 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "state_2_anim":          { "tip": "State 2 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "state_3_anim":          { "tip": "State 3 animation",                         "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
@@ -428,7 +455,7 @@ component_field_metadata = {
         "audio_event_guid_progress": { "tip": "Progress audio event GUID",             "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "audio_music_cue_offer_accept": { "tip": "Offer accept music cue",             "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
         "audio_music_cue_turn_in": { "tip": "Turn-in music cue",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
-        "turn_in_icon_id":       { "tip": "Turn-in icon id",                          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": "icons", "default": None },
+        "turn_in_icon_id":       { "tip": "Turn-in icon id",                          "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "lookup": { "table": "Icons", "column": "IconID", "label_columns": ["IconName", "IconPath"], "detail_columns": ["IconPath"], "order_by": ["IconID"] }, "default": None },
         "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
         "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
         "gate_version":          { "tip": "Version gate string",                       "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },

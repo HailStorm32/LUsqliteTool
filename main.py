@@ -86,8 +86,6 @@ if __name__ == "__main__":
 
 """
 TODO:
-- Investigate why NPC spawns with default bob figure
-- Pull ColorType values from DB (BrickColors table) instead of hardcoding
 - Pull rarity values from DB (RarityTable) for use in loot matrix instead of hardcoding
 
 

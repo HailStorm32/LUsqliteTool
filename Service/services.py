@@ -169,12 +169,12 @@ class BaseService:
             raise RuntimeError("Repository not configured for this service")
         return self._repo.generate_new_component_id(preferred_id, table)
 
-    def get_lookup_options(self, lookup_name: str) -> list[dict[str, Any]]:
+    def get_lookup_options(self, lookup_spec: Any) -> list[dict[str, Any]]:
         """Return lookup rows used by UI dropdowns, when supported by the repository."""
         if self._repo is None:
             raise RuntimeError("Repository not configured for this service")
         if hasattr(self._repo, "get_lookup_options"):
-            return self._repo.get_lookup_options(lookup_name)
+            return self._repo.get_lookup_options(lookup_spec)
         return []
 
     def _get_metadata_defaults(

@@ -1,6 +1,8 @@
 import sqlite3
 import logging
-from typing import Any, Callable
+import re
+from copy import deepcopy
+from typing import Any
 from Domain.domains import *
 from Repository.exceptions import NotFoundError, DataIntegrityError, SaveError
 
@@ -34,56 +36,150 @@ def _rgb_to_hex(red: Any, green: Any, blue: Any) -> str:
     )
 
 
-def _build_icon_lookup_option(row: sqlite3.Row) -> dict[str, Any]:
-    icon_name = str(row["IconName"] or "").strip()
-    icon_path = str(row["IconPath"] or "").strip()
-    label = icon_name or icon_path
-    detail = icon_path if icon_path and icon_path != label else ""
-    return {
-        "id": row["IconID"],
-        "label": label,
-        "detail": detail,
-    }
+LOOKUP_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-
-def _build_torso_lookup_option(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "id": row["ID"],
-        "label": str(row["High_path"] or "").strip(),
-    }
-
-
-def _build_brick_color_lookup_option(row: sqlite3.Row) -> dict[str, Any]:
-    red = _rgb_component_to_int(row["red"])
-    green = _rgb_component_to_int(row["green"])
-    blue = _rgb_component_to_int(row["blue"])
-    return {
-        "id": row["id"],
-        "label": str(row["description"] or "").strip(),
-        "detail": f"RGB({red}, {green}, {blue})",
-        "preview_hex": _rgb_to_hex(row["red"], row["green"], row["blue"]),
-        "preview_text": f"RGB({red}, {green}, {blue})",
-    }
-
-
-LOOKUP_SPECS: dict[str, dict[str, Any]] = {
-    # Central lookup registry for linked-table editor controls.
-    # Adding a future lookup should only require:
-    # 1. a metadata `lookup` entry on the field, and
-    # 2. one spec here describing how to query/format the linked rows.
+LOOKUP_ALIASES: dict[str, dict[str, Any]] = {
+    # Backward-compatible alias map. The UI metadata can pass the full lookup
+    # spec directly, but existing alias names still resolve through the same
+    # generic table/column pipeline.
     "icons": {
-        "query": "SELECT IconID, IconName, IconPath FROM Icons ORDER BY IconID",
-        "builder": _build_icon_lookup_option,
+        "table": "Icons",
+        "column": "IconID",
+        "label_columns": ["IconName", "IconPath"],
+        "detail_columns": ["IconPath"],
+        "order_by": ["IconID"],
     },
     "minifig_torsos": {
-        "query": "SELECT ID, High_path FROM MinifigDecals_Torsos ORDER BY ID",
-        "builder": _build_torso_lookup_option,
+        "table": "MinifigDecals_Torsos",
+        "column": "ID",
+        "label_columns": ["High_path"],
+        "order_by": ["ID"],
     },
     "brick_colors": {
-        "query": "SELECT id, description, red, green, blue, alpha FROM BrickColors ORDER BY id",
-        "builder": _build_brick_color_lookup_option,
+        "table": "BrickColors",
+        "column": "id",
+        "label_columns": ["description"],
+        "order_by": ["id"],
+        "preview": {
+            "type": "rgb",
+            "red": "red",
+            "green": "green",
+            "blue": "blue",
+        },
     },
 }
+
+
+def _normalize_lookup_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _validate_lookup_identifier(identifier: Any, label: str) -> str:
+    text = str(identifier or "").strip()
+    if not LOOKUP_IDENTIFIER_RE.fullmatch(text):
+        raise ValueError(f"Invalid {label}: {identifier!r}")
+    return text
+
+
+def _quote_lookup_identifier(identifier: Any, label: str) -> str:
+    return f'"{_validate_lookup_identifier(identifier, label)}"'
+
+
+def _normalize_lookup_preview(preview_spec: Any) -> dict[str, Any] | None:
+    if not isinstance(preview_spec, dict):
+        return None
+    preview_type = str(preview_spec.get("type") or "").strip().lower()
+    if preview_type != "rgb":
+        return None
+    return {
+        "type": "rgb",
+        "red": _validate_lookup_identifier(preview_spec.get("red"), "lookup preview red column"),
+        "green": _validate_lookup_identifier(preview_spec.get("green"), "lookup preview green column"),
+        "blue": _validate_lookup_identifier(preview_spec.get("blue"), "lookup preview blue column"),
+    }
+
+
+def _normalize_lookup_spec(lookup_spec: Any) -> dict[str, Any]:
+    if isinstance(lookup_spec, str):
+        spec = deepcopy(LOOKUP_ALIASES.get(lookup_spec, {}))
+        if not spec:
+            raise ValueError(f"Unknown lookup alias: {lookup_spec}")
+    elif isinstance(lookup_spec, dict):
+        spec = deepcopy(lookup_spec)
+    else:
+        raise ValueError(f"Unsupported lookup spec: {lookup_spec!r}")
+
+    table = _validate_lookup_identifier(spec.get("table"), "lookup table")
+    column = _validate_lookup_identifier(spec.get("column"), "lookup column")
+    label_columns = [
+        _validate_lookup_identifier(column_name, "lookup label column")
+        for column_name in _normalize_lookup_list(spec.get("label_columns"))
+    ]
+    detail_columns = [
+        _validate_lookup_identifier(column_name, "lookup detail column")
+        for column_name in _normalize_lookup_list(spec.get("detail_columns"))
+    ]
+    order_by = [
+        _validate_lookup_identifier(column_name, "lookup order-by column")
+        for column_name in _normalize_lookup_list(spec.get("order_by"))
+    ] or [column]
+
+    return {
+        "table": table,
+        "column": column,
+        "label_columns": label_columns,
+        "detail_columns": detail_columns,
+        "order_by": order_by,
+        "preview": _normalize_lookup_preview(spec.get("preview")),
+        "distinct": bool(spec.get("distinct", False)),
+    }
+
+
+def _build_lookup_option(row: sqlite3.Row, lookup_spec: dict[str, Any]) -> dict[str, Any]:
+    label = ""
+    for column_name in lookup_spec["label_columns"]:
+        value = str(row[column_name] or "").strip()
+        if value:
+            label = value
+            break
+
+    detail_parts: list[str] = []
+    seen_parts = {label.lower()} if label else set()
+    for column_name in lookup_spec["detail_columns"]:
+        value = str(row[column_name] or "").strip()
+        lowered = value.lower()
+        if value and lowered not in seen_parts:
+            detail_parts.append(value)
+            seen_parts.add(lowered)
+
+    option = {
+        "id": row[lookup_spec["column"]],
+        "label": label,
+        "detail": " | ".join(detail_parts),
+    }
+
+    preview_spec = lookup_spec.get("preview")
+    if isinstance(preview_spec, dict) and preview_spec.get("type") == "rgb":
+        red = _rgb_component_to_int(row[preview_spec["red"]])
+        green = _rgb_component_to_int(row[preview_spec["green"]])
+        blue = _rgb_component_to_int(row[preview_spec["blue"]])
+        preview_text = f"RGB({red}, {green}, {blue})"
+        option["preview_hex"] = _rgb_to_hex(
+            row[preview_spec["red"]],
+            row[preview_spec["green"]],
+            row[preview_spec["blue"]],
+        )
+        option["preview_text"] = preview_text
+        if not option["detail"]:
+            option["detail"] = preview_text
+
+    return option
 
 class baseRepository:
     def __init__(self, db_file: str):
@@ -165,17 +261,32 @@ class baseRepository:
         finally:
             conn.close()
 
-    def get_lookup_options(self, lookup_name: str) -> list[dict[str, Any]]:
-        """Return generic linked-table lookup options for editor dropdowns."""
-        spec = LOOKUP_SPECS.get(str(lookup_name))
-        if spec is None:
-            return []
+    def get_lookup_options(self, lookup_spec: Any) -> list[dict[str, Any]]:
+        """Return linked-table lookup options described by metadata lookup specs."""
+        spec = _normalize_lookup_spec(lookup_spec)
+
+        selected_columns: list[str] = [spec["column"]]
+        for column_name in spec["label_columns"] + spec["detail_columns"] + spec["order_by"]:
+            if column_name not in selected_columns:
+                selected_columns.append(column_name)
+
+        preview_spec = spec.get("preview")
+        if isinstance(preview_spec, dict) and preview_spec.get("type") == "rgb":
+            for column_name in (preview_spec["red"], preview_spec["green"], preview_spec["blue"]):
+                if column_name not in selected_columns:
+                    selected_columns.append(column_name)
+
+        select_sql = ", ".join(_quote_lookup_identifier(column_name, "lookup column") for column_name in selected_columns)
+        order_sql = ", ".join(_quote_lookup_identifier(column_name, "lookup order-by column") for column_name in spec["order_by"])
+        distinct_sql = "DISTINCT " if spec.get("distinct") else ""
+        table_sql = _quote_lookup_identifier(spec["table"], "lookup table")
 
         conn = self._connect_to_db()
         try:
-            rows = conn.execute(str(spec["query"])).fetchall()
-            builder: Callable[[sqlite3.Row], dict[str, Any]] = spec["builder"]
-            return [builder(row) for row in rows]
+            rows = conn.execute(
+                f"SELECT {distinct_sql}{select_sql} FROM {table_sql} ORDER BY {order_sql}"
+            ).fetchall()
+            return [_build_lookup_option(row, spec) for row in rows]
         finally:
             conn.close()
 
