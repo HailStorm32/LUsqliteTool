@@ -279,7 +279,7 @@ component_field_metadata = {
     # ---------------------------------------------------------------
     "MissionNPCComponentRow": {
         "id":                    { "tip": "Parent component id",                      "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": True,  "default": None },
-        "mission_id":            { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
+        "mission_id":            { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "offers_mission":        { "tip": "NPC can offer mission",                    "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": False, "default": True },
         "accepts_mission":       { "tip": "NPC can accept turn-in",                   "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": False, "default": True },
         "gate_version":          { "tip": "Version gate string",                      "display_name": "", "type": str,   "min": None, "max": None,       "readonly": False, "advanced": True,  "default": None },
