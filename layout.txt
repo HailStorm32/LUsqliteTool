@@ -1,24 +1,51 @@
 Directory Structure
 
 Domain/
-    - domains.py  #Contains classes for each table as well as classes for the common objects (NPC(vendor & mission) & item)
+    - domains.py
+      Dataclasses for table rows and higher-level editor objects such as Item and NPC.
 
-Repository/    #Classes responsible for doing all the SQL transactions for each object
+Repository/
+    - base.py
+      Shared repository utilities, id generation, linked-table lookup loading, common delete logic.
     - item.py
+      SQL persistence for Items and related rows.
     - npc.py
+      SQL persistence for NPCs and related rows.
 
 Service/
-    - services.py #Contains service classes the GUI will call
+    - services.py
+      Service layer used by the GUI. Applies editor rules, defaults, validation, and orchestration.
+
+gui/
+    - __init__.py
+      Package exports for Application, BaseObjectEntityTab, ItemsTab, and NPCTab.
+    - gui.py
+      Shared/base Tkinter GUI code plus Application.
+    - item_tab.py
+      Item tab GUI implementation.
+    - npc_tab.py
+      NPC tab GUI implementation.
+
+Project root
+    - metadata.py
+      Field metadata for form generation, defaults, readonly flags, advanced flags, and linked-table lookups.
+    - main.py
+      Startup entry point. Chooses DB, creates a backup, configures logging, and launches the app.
+    - logging_config.py
+      Logging setup helpers.
+    - layout.txt
+      This reference document.
 
 
-GUI should call the service only. Keeps UI decoupled from storage and lets you change persistence without touching the GUI.
+Architecture
 
+GUI should call the service only. The GUI should not talk to repositories or SQLite directly.
 
 [ Tkinter widgets ]
         |
    (events)
         v
-[ Service layer ]  <-- enforce rules, orchestrate
+[ Service layer ]  <-- rules, defaults, orchestration, validation
         |
         v
 [ Repository ]     <-- all SQL lives here
@@ -27,93 +54,138 @@ GUI should call the service only. Keeps UI decoupled from storage and lets you c
 [ SQLite DB ]
 
 
-
 -----------------------------------------------------------------------------------------------------------------------------------------------
 
-list iid naming:
+Tree iid naming
 
 Parent:
-    parentiid
-
-    ex:
     [obj_type]-[obj_id]
 
+    Examples:
     item-2345
+    npc-16940
 
 
 Child:
-    parentiid:childiid
-
-    ex:
     [parentiid]:[component_name]
 
+    Examples:
     item-2345:RenderComponent
+    npc-16940:MissionNPCComponent
+
 
 SubChild:
-    parentiid:childiid:subChildiid
+    [parentiid]:[childiid]:[row_key]
 
-    ex:
-    [parentiid]:[childiid]:[id]
-
-    item-345:ObjectSkill:342
+    Examples:
+    item-2345:ObjectSkill:342
+    npc-16940:MissionTasks:2541
+    npc-16935:VendorLootTable:20824
 
 
 -----------------------------------------------------------------------------------------------------------------------------------------------
 
-"""
+Notes
+
+- New NPC creation defaults to Objects.type = UserGeneratedNPCs.
+- The GUI exposes editor-owned rows and hides helper/index tables that are maintained automatically.
+- Linked-table dropdowns are defined in metadata.py using a lookup dict. Those are reference/select controls, not owned rows.
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------
+
 Table Maps
 
-NPC (vendor):
+NPC (vendor)
 - Objects
 - ComponentsRegistry
   - RenderComponent (2)
+    - Icons lookup via metadata on icon_id
   - MinifigComponent (35)
-    - MinifigDecals_Torsos **
+    - BrickColors lookup via metadata on chest, legs, haircolor
+    - MinifigDecals_Torsos lookup via metadata on chestdecal
   - PhysicsComponent (3)
-  - InventoryComponent (17)
-  - DestructibleComponent (7) *
-    - LootMatrix
-      - LootTable
-    - CurrencyTable *?
+  - InventoryComponent (17) [optional]
+  - DestructibleComponent (7) [optional]
+    - LootMatrixIndex [internal, hidden in UI]
+    - LootMatrix [visible in UI]
+    - LootTableIndex [internal, hidden in UI]
+    - LootTable [visible in UI]
+    - CurrencyTable [visible in UI]
   - VendorComponent (16)
-    - LootMatrix
-      - LootTable
-  - ScriptComponent (5) *
+    - LootMatrixIndex [internal, hidden in UI]
+    - LootMatrix [visible in UI]
+    - LootTableIndex [internal, hidden in UI]
+    - LootTable [visible in UI]
+  - ScriptComponent (5) [optional]
+
+Vendor loot link flow
+- VendorComponent.loot_matrix_index
+  -> LootMatrixIndex.loot_matrix_index
+  -> LootMatrix.loot_matrix_index
+  -> LootTableIndex.loot_table_index
+  -> LootTable.loot_table_index
 
 
-
-NPC (mission):
+NPC (mission)
 - Objects
 - ComponentsRegistry
   - RenderComponent (2)
+    - Icons lookup via metadata on icon_id
   - MinifigComponent (35)
-    - MinifigDecals_Torsos **
+    - BrickColors lookup via metadata on chest, legs, haircolor
+    - MinifigDecals_Torsos lookup via metadata on chestdecal
   - PhysicsComponent (3)
-  - InventoryComponent (17)
-  - DestructibleComponent (7) *
-    - LootMatrix
-      - LootTable
-    - CurrencyTable *?
+  - InventoryComponent (17) [optional]
+  - DestructibleComponent (7) [optional]
+    - LootMatrixIndex [internal, hidden in UI]
+    - LootMatrix [visible in UI]
+    - LootTableIndex [internal, hidden in UI]
+    - LootTable [visible in UI]
+    - CurrencyTable [visible in UI]
   - MissionNPCComponent (73)
     - Missions
     - MissionTasks
+      - Icons lookup via metadata on icon_id and large_task_icon_id
     - MissionText
-    - MissionEmail *
-    - Icons
-  - ScriptComponent (5) **
+      - Icons lookup via metadata on icon_id and turn_in_icon_id
+    - MissionEmail [optional]
+  - ScriptComponent (5) [optional]
+
+Mission link flow
+- MissionNPCComponent.id
+  -> MissionNPCComponent rows
+  -> mission_id
+  -> Missions.id
+  -> MissionTasks.id
+  -> MissionText.id
+  -> MissionEmail.mission_id
 
 
-Item:
+NPC (destructible loot/currency)
+- DestructibleComponent.currency_index
+  -> CurrencyTable.currency_index
+
+- DestructibleComponent.loot_matrix_index
+  -> LootMatrixIndex.loot_matrix_index
+  -> LootMatrix.loot_matrix_index
+  -> LootTableIndex.loot_table_index
+  -> LootTable.loot_table_index
+
+
+Item
 - Objects
 - ComponentsRegistry
   - RenderComponent (2)
+    - Icons lookup via metadata on icon_id
   - ItemComponent (11)
-    "decal" column links to one of the following if torso or leg:
-    - MinifigDecals_Torsos
-    - MinifigDecals_legs
+    - BrickColors lookup via metadata on color1
+    - MinifigDecals_Torsos / MinifigDecals_legs remain lookup/reference concerns where applicable
   - ObjectSkill (9)
 
-* Optional
-** Copy from other NPC
 
-"""
+Ownership / UI rules
+
+- LootMatrixIndex and LootTableIndex are real schema tables, but they are editor-maintained implementation details and should stay hidden from users.
+- LootMatrix, LootTable, CurrencyTable, Missions, MissionTasks, MissionText, and MissionEmail are editable row collections in the UI.
+- Shared lookup tables such as Icons, BrickColors, MinifigDecals_Torsos, and RarityTableIndex are selectable from dropdowns and are not edited inline from the Item/NPC tabs.
