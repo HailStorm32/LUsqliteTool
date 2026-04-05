@@ -767,13 +767,13 @@ class NPCTab(BaseObjectEntityTab):
         if row is None:
             return None
 
-        if component_key in {"InventoryComponent", "CurrencyTable"}:
+        if component_key in {"InventoryComponent", "CurrencyTable", "MissionTasks"}:
             return (
                 "Delete row (local)",
                 lambda: self._delete_simple_collection_row(obj, component_key, parts[0], row_key),
             )
 
-        if component_key in {"MissionNPCComponent", "Missions", "MissionTasks", "MissionText", "MissionEmail"}:
+        if component_key in {"MissionNPCComponent", "Missions", "MissionText", "MissionEmail"}:
             mission_id = None
             if component_key == "MissionNPCComponent":
                 mission_id = getattr(row, "mission_id", None)
