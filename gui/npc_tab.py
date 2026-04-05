@@ -100,6 +100,33 @@ class NPCTab(BaseObjectEntityTab):
     def _format_collection_row_text(self, component: Any, row: Any) -> str:
         prefix = self._get_component_label_prefix(component)
 
+        if prefix == "Task":
+            mission_id = getattr(row, "id", None)
+            if mission_id is not None:
+                # Number tasks within each mission using the current collection order
+                # so the sidebar shows Task #1, Task #2, etc. instead of raw uid values.
+                mission_rows = [
+                    task_row
+                    for task_row in self._get_component_rows(component)
+                    if getattr(task_row, "id", None) == mission_id
+                ]
+                for task_number, task_row in enumerate(mission_rows, start=1):
+                    if task_row is row:
+                        return f"Mission {mission_id} Task #{task_number}"
+
+                row_uid = getattr(row, "uid", None)
+                if row_uid is not None:
+                    for task_number, task_row in enumerate(mission_rows, start=1):
+                        if getattr(task_row, "uid", None) == row_uid:
+                            return f"Mission {mission_id} Task #{task_number}"
+
+                return f"Mission {mission_id} Task"
+
+        if prefix == "Text":
+            mission_id = getattr(row, "id", None)
+            if mission_id is not None:
+                return f"Mission {mission_id} Text"
+
         if prefix == "LootMatrix":
             loot_matrix_index = getattr(row, "loot_matrix_index", None)
             if loot_matrix_index is not None:

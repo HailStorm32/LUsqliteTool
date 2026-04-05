@@ -406,7 +406,7 @@ component_field_metadata = {
     # Mission task row metadata
     # ---------------------------------------------------------------
     "MissionTaskRow": {
-        "id":                    { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
+        "id":                    { "tip": "Mission id",                               "display_name": "mission id", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False,  "advanced": False, "default": None },
         "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
         "task_type":             { "tip": "Task type enum",                            "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
         "target":                { "tip": "Task target id",                            "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },

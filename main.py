@@ -25,7 +25,7 @@ DB_PATH: str | None = None
 # Application version shown in the window title. Update as you release.
 APP_VERSION: str = "0.1.0"
 # Default window size passed to the GUI on startup. Format: "WIDTHxHEIGHT"
-WINDOW_SIZE: str = "1380x900"
+WINDOW_SIZE: str = "1480x900"
 
 def main() -> None:
     """Entry point: configure logging, choose database, and launch Tkinter GUI."""
