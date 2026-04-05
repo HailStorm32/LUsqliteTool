@@ -245,7 +245,7 @@ class ItemComponent:
     req_spec_rank: int = 0
     req_achievement_id: int = 0
     stack_size: int = 1
-    color1: ColorType = ColorType.WHITE
+    color1: int = 10
     decal: Optional[int] = None
     offset_group_id: Optional[int] = None
     build_types: int = 0

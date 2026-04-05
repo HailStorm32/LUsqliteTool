@@ -32,7 +32,7 @@ component_field_metadata = {
 
         # Stack / appearance
         "stack_size":                 { "tip": "Max stack size",                     "display_name": "",     "type": int,        "min": 1,       "max": 256,            "readonly": False,  "advanced": False   , "default": None },
-        "color1":                     { "tip": "Primary color index (placeholder)",  "display_name": "",     "type": int,        "min": 0,       "max": 255,            "readonly": False,  "advanced": True    , "default": None },
+        "color1":                     { "tip": "Primary BrickColor id",              "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "lookup": "brick_colors", "default": 10 },
         "decal":                      { "tip": "Decal id (optional)",                "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "default": None },
         "offset_group_id":            { "tip": "Offset group id",                    "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "default": None },
         "build_types":                { "tip": "Bitmask build types",                "display_name": "",     "type": int,        "min": 0,       "max": INT_32_MAX,     "readonly": False,  "advanced": True    , "default": None },
