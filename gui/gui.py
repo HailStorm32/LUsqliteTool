@@ -2581,16 +2581,20 @@ class BaseObjectEntityTab(ttk.Frame):
 class Application:
     """Main Tkinter application window."""
 
-    def __init__(self, db_path: Path, version: str | None = None):
+    def __init__(self, db_path: Path, version: str | None = None, window_size: str | None = None):
         """Create the main window.
 
         version: optional version string to display in the window title, e.g. "0.1.0".
         Keeping this argument optional preserves backward compatibility and makes it
         easy for packaging/CI to stamp the version in the entry point without
         touching this module.
+
+        window_size: optional Tk geometry string for the initial window size,
+        e.g. "1280x900". If omitted, the default startup size is used.
         """
         self.db_path = Path(db_path)
         self.version = version
+        self.window_size = window_size
         self.root = tk.Tk()
         # Compose a friendly title that includes the version when provided
         base_title = "LU SQLite Tool"
@@ -2602,9 +2606,11 @@ class Application:
         except Exception:
             # Last-resort fallback to a static title
             self.root.title(base_title)
-        # Set a larger initial window size so more fields are visible without resizing.
-        # Width x Height;
-        self.root.geometry("1280x900")
+        # Set the initial window size from the entry-point configuration when provided.
+        if isinstance(self.window_size, str) and self.window_size.strip():
+            self.root.geometry(self.window_size.strip())
+        else:
+            self.root.geometry("1280x900")
 
         # Route Tkinter callback exceptions to logger (helps catch UI errors)
         try:

@@ -24,6 +24,8 @@ DB_PATH: str | None = None
 
 # Application version shown in the window title. Update as you release.
 APP_VERSION: str = "0.1.0"
+# Default window size passed to the GUI on startup. Format: "WIDTHxHEIGHT"
+WINDOW_SIZE: str = "1380x900"
 
 def main() -> None:
     """Entry point: configure logging, choose database, and launch Tkinter GUI."""
@@ -69,8 +71,8 @@ def main() -> None:
         log.exception("Failed to create database backup for %s", db_file)
 
     log.info("Starting application with database: %s", db_file)
-    # Pass the version to the GUI so it can be displayed in the window title
-    app = Application(db_file, version=APP_VERSION)
+    # Pass runtime display settings into the GUI.
+    app = Application(db_file, version=APP_VERSION, window_size=WINDOW_SIZE)
     try:
         app.run()
     except Exception:
