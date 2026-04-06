@@ -574,6 +574,25 @@ class NPCTab(BaseObjectEntityTab):
             self._select_npc_target(obj, "MissionEmail", str(row.id))
             self._mark_tree_change()
 
+        def _clear_vendor_loot_link() -> None:
+            current_index = getattr(getattr(obj, "components", {}).get("VendorComponent"), "loot_matrix_index", None)
+            if not messagebox.askyesno(
+                "Clear vendor loot link",
+                (
+                    f"Set VendorComponent LootMatrixIndex to None (0) for NPC {obj.object_id}?\n\n"
+                    f"Current value: {current_index}\n\n"
+                    "This leaves the vendor component in place and the NPC can still save.\n\n"
+                    "The vendor will remain unlinked until you assign a valid vendor loot matrix again."
+                ),
+                icon=messagebox.WARNING,
+                default=messagebox.NO,
+            ):
+                return
+            self._service.clear_vendor_loot_link(obj)
+            self._select_npc_target(obj, "VendorComponent")
+            self._mark_tree_change()
+
+
         def _add_vendor_loot(target_component: str) -> None:
             if target_component == "VendorLootTable":
                 matrix_row, loot_row = self._service.add_loot_table_row(obj, "vendor")
@@ -608,6 +627,7 @@ class NPCTab(BaseObjectEntityTab):
             "MissionText": [("Add mission bundle", lambda: _add_mission_bundle("MissionText"))],
             "MissionTasks": [("Add task row", _add_task)],
             "MissionEmail": [("Add email row", _add_email)],
+            "VendorComponent": [("Set LootMatrix link to None (0)", _clear_vendor_loot_link)],
             "VendorLootMatrix": [("Add loot entry", lambda: _add_vendor_loot("VendorLootMatrix"))],
             "VendorLootTable": [("Add loot entry", lambda: _add_vendor_loot("VendorLootTable"))],
             "DestructibleLootMatrix": [("Add loot entry", lambda: _add_destructible_loot("DestructibleLootMatrix"))],

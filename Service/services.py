@@ -590,14 +590,20 @@ class NPCService(BaseService):
             return
 
         loot_matrix_index = getattr(vendor, "loot_matrix_index", None)
+        if loot_matrix_index == 0:
+            log.debug(
+                "Vendor save validation skipped object_id=%s reason=loot_matrix_link_none",
+                npc.object_id,
+            )
+            return
         if not self._has_linked_index(loot_matrix_index):
             log.error(
                 "Vendor save validation failed object_id=%s reason=missing_loot_matrix_index",
                 npc.object_id,
             )
             raise ValueError(
-                "VendorComponent requires a valid LootMatrix before saving.\n\n"
-                "Add a vendor loot matrix and at least one linked loot table entry."
+                f"NPC {npc.object_id}: VendorComponent LootMatrixIndex is invalid ({loot_matrix_index!r}).\n\n"
+                "Set it to 0 to leave the vendor unlinked, or assign a valid vendor loot matrix with at least one linked loot table entry."
             )
 
         matrix_collection = npc.components.get("VendorLootMatrix")
@@ -613,8 +619,8 @@ class NPCService(BaseService):
                 loot_matrix_index,
             )
             raise ValueError(
-                f"VendorComponent LootMatrixIndex {loot_matrix_index} does not link to any LootMatrix rows.\n\n"
-                "Add a vendor loot matrix and at least one linked loot table entry before saving."
+                f"NPC {npc.object_id}: VendorComponent LootMatrixIndex {loot_matrix_index} does not link to any LootMatrix rows.\n\n"
+                "Add a vendor loot matrix and at least one linked loot table entry before saving, or set the link to 0 to leave the vendor unlinked."
             )
 
         table_collection = npc.components.get("VendorLootTable")
@@ -644,7 +650,7 @@ class NPCService(BaseService):
                 invalid_text,
             )
             raise ValueError(
-                f"VendorComponent LootMatrixIndex {loot_matrix_index} contains LootMatrix rows with invalid LootTableIndex values: {invalid_text}.\n\n"
+                f"NPC {npc.object_id}: VendorComponent LootMatrixIndex {loot_matrix_index} contains LootMatrix rows with invalid LootTableIndex values: {invalid_text}.\n\n"
                 "Each vendor loot matrix entry must link to a valid loot table row before saving."
             )
 
@@ -655,7 +661,7 @@ class NPCService(BaseService):
                 loot_matrix_index,
             )
             raise ValueError(
-                f"VendorComponent LootMatrixIndex {loot_matrix_index} does not link to any LootTable rows.\n\n"
+                f"NPC {npc.object_id}: VendorComponent LootMatrixIndex {loot_matrix_index} does not link to any LootTable rows.\n\n"
                 "Add at least one vendor loot table entry before saving."
             )
 
@@ -669,7 +675,7 @@ class NPCService(BaseService):
                 missing_text,
             )
             raise ValueError(
-                f"VendorComponent LootMatrixIndex {loot_matrix_index} references LootTableIndex values with no LootTable rows: {missing_text}.\n\n"
+                f"NPC {npc.object_id}: VendorComponent LootMatrixIndex {loot_matrix_index} references LootTableIndex values with no LootTable rows: {missing_text}.\n\n"
                 "Each vendor loot matrix entry must link to at least one loot table row before saving."
             )
 
@@ -1170,6 +1176,24 @@ class NPCService(BaseService):
             dirty=True,
         )
         return comp
+
+    def clear_vendor_loot_link(self, npc: NPC) -> None:
+        vendor = self.add_vendor_component(npc)
+        previous_index = getattr(vendor, "loot_matrix_index", None)
+        vendor.loot_matrix_index = 0
+        vendor.dirty = True
+
+        matrix_index_collection = npc.components.get("VendorLootMatrixIndex")
+        if isinstance(matrix_index_collection, RowCollection):
+            matrix_index_collection.rows = []
+            matrix_index_collection.loaded_keys = set()
+            matrix_index_collection.dirty = True
+
+        log.info(
+            "Cleared vendor loot link object_id=%s previous_loot_matrix_index=%s new_loot_matrix_index=0",
+            npc.object_id,
+            previous_index,
+        )
 
     def add_destructible_component(self, npc: NPC) -> DestructibleComponent:
         comp = npc.components.get("DestructibleComponent")
