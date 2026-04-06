@@ -547,6 +547,9 @@ class NPCService(BaseService):
 
     def __init__(self, db_path: Path | str):
         super().__init__(db_path, NPCRepository)
+        # Track generated ids across all in-memory NPC edits so unsaved changes on
+        # one object still reserve their ids when another object allocates rows.
+        self._reserved_int_values: dict[str, set[int]] = {}
 
     def get_npc(self, object_id: int) -> NPC:
         return self.get(object_id)
@@ -568,6 +571,7 @@ class NPCService(BaseService):
 
     def _validate_npc_before_save(self, npc: NPC) -> None:
         self._validate_vendor_loot_state(npc)
+        self._validate_mission_task_links(npc)
 
     def _validate_vendor_loot_state(self, npc: NPC) -> None:
         vendor = npc.components.get("VendorComponent")
@@ -658,6 +662,47 @@ class NPCService(BaseService):
                 "Each vendor loot matrix entry must link to at least one loot table row before saving."
             )
 
+    def _validate_mission_task_links(self, npc: NPC) -> None:
+        task_collection = npc.components.get("MissionTasks")
+        if not isinstance(task_collection, RowCollection):
+            return
+
+        npc_mission_component = npc.components.get("MissionNPCComponent")
+        valid_mission_ids = (
+            {
+                int(getattr(row, "mission_id"))
+                for row in getattr(npc_mission_component, "rows", []) or []
+                if isinstance(getattr(row, "mission_id", None), int)
+            }
+            if isinstance(npc_mission_component, RowCollection)
+            else set()
+        )
+
+        invalid_tasks: list[tuple[int | None, int | None]] = []
+        for row in getattr(task_collection, "rows", []) or []:
+            mission_id = getattr(row, "id", None)
+            if not isinstance(mission_id, int) or mission_id not in valid_mission_ids:
+                invalid_tasks.append((getattr(row, "uid", None), mission_id))
+
+        if not invalid_tasks:
+            return
+
+        invalid_text = ", ".join(
+            f"uid={uid if uid is not None else '?'} mission_id={mission_id if mission_id is not None else 'NULL'}"
+            for uid, mission_id in invalid_tasks
+        )
+        log.error(
+            "Mission task save validation failed object_id=%s invalid_tasks=%s valid_mission_ids=%s",
+            npc.object_id,
+            invalid_text,
+            sorted(valid_mission_ids),
+        )
+        raise ValueError(
+            f"NPC {npc.object_id}: MissionTasks contains rows that are not linked to a mission owned by this NPC.\n\n"
+            f"Invalid rows: {invalid_text}\n"
+            f"Valid NPC mission ids: {', '.join(str(mid) for mid in sorted(valid_mission_ids)) or '[none]'}"
+        )
+
     def _resolve_new_object_id(self, object_id: int | None) -> int:
         if object_id is not None:
             oid = self._require_positive_int(object_id, "Object ID")
@@ -742,11 +787,20 @@ class NPCService(BaseService):
         label: str,
         object_id: int | None,
     ) -> int:
+        reserved_values = self._reserved_int_values.setdefault(label, set())
+        all_used_values = set(used_values) | reserved_values
         candidate = int(generator())
-        while candidate in used_values:
+        while candidate in all_used_values:
             candidate += 1
+        reserved_values.add(candidate)
         used_values.add(candidate)
-        log.debug("Reserved %s=%s object_id=%s", label, candidate, object_id)
+        log.debug(
+            "Reserved %s=%s object_id=%s session_reserved=%s",
+            label,
+            candidate,
+            object_id,
+            len(reserved_values),
+        )
         return candidate
 
     def _has_linked_index(self, value: Any) -> bool:

@@ -88,8 +88,7 @@ if __name__ == "__main__":
 
 """
 TODO:
-
-
+- use the same naming convention for the misision email tab
 
 DestructableCompoent -  DeathBehavior mapping
     https://discord.com/channels/942917763054313552/942924632955174952/1427887339828678713
