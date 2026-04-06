@@ -127,6 +127,26 @@ class NPCTab(BaseObjectEntityTab):
             if mission_id is not None:
                 return f"Mission {mission_id} Text"
 
+        if prefix == "Email":
+            mission_id = getattr(row, "mission_id", None)
+            if mission_id is not None:
+                email_rows = [
+                    email_row
+                    for email_row in self._get_component_rows(component)
+                    if getattr(email_row, "mission_id", None) == mission_id
+                ]
+                for email_number, email_row in enumerate(email_rows, start=1):
+                    if email_row is row:
+                        return f"Mission {mission_id} Email #{email_number}"
+
+                row_id = getattr(row, "id", None)
+                if row_id is not None:
+                    for email_number, email_row in enumerate(email_rows, start=1):
+                        if getattr(email_row, "id", None) == row_id:
+                            return f"Mission {mission_id} Email #{email_number}"
+
+                return f"Mission {mission_id} Email"
+
         if prefix == "LootMatrix":
             loot_matrix_index = getattr(row, "loot_matrix_index", None)
             if loot_matrix_index is not None:
@@ -767,13 +787,13 @@ class NPCTab(BaseObjectEntityTab):
         if row is None:
             return None
 
-        if component_key in {"InventoryComponent", "CurrencyTable", "MissionTasks"}:
+        if component_key in {"InventoryComponent", "CurrencyTable", "MissionTasks", "MissionEmail"}:
             return (
                 "Delete row (local)",
                 lambda: self._delete_simple_collection_row(obj, component_key, parts[0], row_key),
             )
 
-        if component_key in {"MissionNPCComponent", "Missions", "MissionText", "MissionEmail"}:
+        if component_key in {"MissionNPCComponent", "Missions", "MissionText"}:
             mission_id = None
             if component_key == "MissionNPCComponent":
                 mission_id = getattr(row, "mission_id", None)

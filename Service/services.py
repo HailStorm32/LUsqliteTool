@@ -572,6 +572,17 @@ class NPCService(BaseService):
     def _validate_npc_before_save(self, npc: NPC) -> None:
         self._validate_vendor_loot_state(npc)
         self._validate_mission_task_links(npc)
+        self._validate_mission_email_links(npc)
+
+    def _get_valid_npc_mission_ids(self, npc: NPC) -> set[int]:
+        npc_mission_component = npc.components.get("MissionNPCComponent")
+        if not isinstance(npc_mission_component, RowCollection):
+            return set()
+        return {
+            int(getattr(row, "mission_id"))
+            for row in getattr(npc_mission_component, "rows", []) or []
+            if isinstance(getattr(row, "mission_id", None), int)
+        }
 
     def _validate_vendor_loot_state(self, npc: NPC) -> None:
         vendor = npc.components.get("VendorComponent")
@@ -667,16 +678,7 @@ class NPCService(BaseService):
         if not isinstance(task_collection, RowCollection):
             return
 
-        npc_mission_component = npc.components.get("MissionNPCComponent")
-        valid_mission_ids = (
-            {
-                int(getattr(row, "mission_id"))
-                for row in getattr(npc_mission_component, "rows", []) or []
-                if isinstance(getattr(row, "mission_id", None), int)
-            }
-            if isinstance(npc_mission_component, RowCollection)
-            else set()
-        )
+        valid_mission_ids = self._get_valid_npc_mission_ids(npc)
 
         invalid_tasks: list[tuple[int | None, int | None]] = []
         for row in getattr(task_collection, "rows", []) or []:
@@ -699,6 +701,37 @@ class NPCService(BaseService):
         )
         raise ValueError(
             f"NPC {npc.object_id}: MissionTasks contains rows that are not linked to a mission owned by this NPC.\n\n"
+            f"Invalid rows: {invalid_text}\n"
+            f"Valid NPC mission ids: {', '.join(str(mid) for mid in sorted(valid_mission_ids)) or '[none]'}"
+        )
+
+    def _validate_mission_email_links(self, npc: NPC) -> None:
+        email_collection = npc.components.get("MissionEmail")
+        if not isinstance(email_collection, RowCollection):
+            return
+
+        valid_mission_ids = self._get_valid_npc_mission_ids(npc)
+        invalid_emails: list[tuple[int | None, int | None]] = []
+        for row in getattr(email_collection, "rows", []) or []:
+            mission_id = getattr(row, "mission_id", None)
+            if not isinstance(mission_id, int) or mission_id not in valid_mission_ids:
+                invalid_emails.append((getattr(row, "id", None), mission_id))
+
+        if not invalid_emails:
+            return
+
+        invalid_text = ", ".join(
+            f"id={row_id if row_id is not None else '?'} mission_id={mission_id if mission_id is not None else 'NULL'}"
+            for row_id, mission_id in invalid_emails
+        )
+        log.error(
+            "Mission email save validation failed object_id=%s invalid_emails=%s valid_mission_ids=%s",
+            npc.object_id,
+            invalid_text,
+            sorted(valid_mission_ids),
+        )
+        raise ValueError(
+            f"NPC {npc.object_id}: MissionEmail contains rows that are not linked to a mission owned by this NPC.\n\n"
             f"Invalid rows: {invalid_text}\n"
             f"Valid NPC mission ids: {', '.join(str(mid) for mid in sorted(valid_mission_ids)) or '[none]'}"
         )

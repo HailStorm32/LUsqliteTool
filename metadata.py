@@ -469,7 +469,7 @@ component_field_metadata = {
         "id":                    { "tip": "Mission id",                               "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True,  "advanced": False, "default": None },
         "message_type":          { "tip": "Mission email message type",               "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
         "notification_group":    { "tip": "Mission email notification group",         "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
-        "mission_id":            { "tip": "Linked mission id",                        "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": True, "advanced": False, "default": None },
+        "mission_id":            { "tip": "Linked mission id",                        "display_name": "", "type": int,   "min": 1,    "max": INT_32_MAX, "readonly": False, "advanced": False, "default": None },
         "attachment_lot":        { "tip": "Attachment item LOT",                      "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": None },
         "localize":              { "tip": "Use localized text",                        "display_name": "", "type": bool,  "min": None, "max": None,       "readonly": False, "advanced": True,  "default": True },
         "loc_status":            { "tip": "Localization status",                       "display_name": "", "type": int,   "min": 0,    "max": INT_32_MAX, "readonly": False, "advanced": True,  "default": 0 },
