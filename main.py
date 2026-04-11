@@ -22,10 +22,15 @@ LOG_FILE_ONLY: bool = False
 # Database path: set to a string path to skip the file dialog; set to None to prompt
 DB_PATH: str | None = None
 
+# Base window title shown in the title bar.
+APP_TITLE: str = "LU SQLite Tool (LU.S.T)"
 # Application version shown in the window title. Update as you release.
-APP_VERSION: str = "0.1.0"
+APP_VERSION: str = "0.2.0"
 # Default window size passed to the GUI on startup. Format: "WIDTHxHEIGHT"
 WINDOW_SIZE: str = "1480x900"
+# Optional window icon shown in the title bar. On Windows, use a .ico
+# file if you want to replace the default top-left/title-bar icon reliably.
+APP_ICON_PATH: str | None = "favicon.ico"
 
 def main() -> None:
     """Entry point: configure logging, choose database, and launch Tkinter GUI."""
@@ -72,7 +77,13 @@ def main() -> None:
 
     log.info("Starting application with database: %s", db_file)
     # Pass runtime display settings into the GUI.
-    app = Application(db_file, version=APP_VERSION, window_size=WINDOW_SIZE)
+    app = Application(
+        db_file,
+        title=APP_TITLE,
+        version=APP_VERSION,
+        window_size=WINDOW_SIZE,
+        icon_path=APP_ICON_PATH,
+    )
     try:
         app.run()
     except Exception:
@@ -88,7 +99,6 @@ if __name__ == "__main__":
 
 """
 TODO:
-
 
 DestructableCompoent -  DeathBehavior mapping
     https://discord.com/channels/942917763054313552/942924632955174952/1427887339828678713

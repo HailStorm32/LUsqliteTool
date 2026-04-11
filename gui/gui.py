@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+import sys
 import tkinter as tk
 from copy import deepcopy
 from tkinter import ttk, messagebox
@@ -20,6 +21,7 @@ from Domain.domains import ColorType  # Color enum used for item color field and
 from Service.services import Item
 
 log = logging.getLogger(__name__)
+
 
 class BaseObjectEntityTab(ttk.Frame):
     """Base class for a tab object entries in the notebook."""
@@ -2581,8 +2583,17 @@ class BaseObjectEntityTab(ttk.Frame):
 class Application:
     """Main Tkinter application window."""
 
-    def __init__(self, db_path: Path, version: str | None = None, window_size: str | None = None):
+    def __init__(
+        self,
+        db_path: Path,
+        title: str | None = None,
+        version: str | None = None,
+        window_size: str | None = None,
+        icon_path: str | Path | None = None,
+    ):
         """Create the main window.
+
+        title: optional base window title shown before the version suffix.
 
         version: optional version string to display in the window title, e.g. "0.1.0".
         Keeping this argument optional preserves backward compatibility and makes it
@@ -2591,13 +2602,18 @@ class Application:
 
         window_size: optional Tk geometry string for the initial window size,
         e.g. "1280x900". If omitted, the default startup size is used.
+
+        icon_path: optional path to a window icon asset.
         """
         self.db_path = Path(db_path)
+        self.title = title
         self.version = version
         self.window_size = window_size
+        self.icon_path = icon_path
+        self._window_icon_image: tk.PhotoImage | None = None
         self.root = tk.Tk()
         # Compose a friendly title that includes the version when provided
-        base_title = "LU SQLite Tool"
+        base_title = title.strip() if isinstance(title, str) and title.strip() else "LU SQLite Tool"
         try:
             if isinstance(self.version, str) and self.version.strip():
                 self.root.title(f"{base_title} v{self.version.strip()}")
@@ -2606,6 +2622,7 @@ class Application:
         except Exception:
             # Last-resort fallback to a static title
             self.root.title(base_title)
+        self._apply_window_icon()
         # Set the initial window size from the entry-point configuration when provided.
         if isinstance(self.window_size, str) and self.window_size.strip():
             self.root.geometry(self.window_size.strip())
@@ -2624,6 +2641,72 @@ class Application:
         self.npc_service = NPCService(self.db_path)
 
         self._build_ui()
+
+    def _resolve_icon_path(self) -> Path | None:
+        """Resolve the configured icon path for source and frozen builds."""
+        if not self.icon_path:
+            return None
+
+        raw_path = Path(self.icon_path)
+        candidates: list[Path] = []
+
+        if raw_path.is_absolute():
+            candidates.append(raw_path)
+            try:
+                candidates.append(Path(sys.executable).resolve().parent / raw_path.name)
+            except Exception:
+                pass
+
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / raw_path.name)
+        else:
+            try:
+                candidates.append(Path(sys.executable).resolve().parent / raw_path)
+            except Exception:
+                pass
+
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / raw_path)
+
+            candidates.append(Path(__file__).resolve().parents[1] / raw_path)
+            candidates.append(Path.cwd() / raw_path)
+
+        seen: set[str] = set()
+        for candidate in candidates:
+            candidate_key = str(candidate)
+            if candidate_key in seen:
+                continue
+            seen.add(candidate_key)
+            if candidate.is_file():
+                return candidate
+
+        checked_paths = ", ".join(str(path) for path in candidates)
+        log.warning("Window icon file not found: %s. Checked: %s", raw_path, checked_paths)
+        return None
+
+    def _apply_window_icon(self) -> None:
+        """Apply the configured window icon when an asset is available."""
+        icon_file = self._resolve_icon_path()
+        if icon_file is None:
+            return
+
+        try:
+            if icon_file.suffix.lower() == ".ico":
+                self.root.iconbitmap(str(icon_file))
+            else:
+                if sys.platform.startswith("win"):
+                    log.warning(
+                        "Windows title-bar icons require a .ico file. Using best-effort fallback for %s",
+                        icon_file,
+                    )
+                self._window_icon_image = tk.PhotoImage(file=str(icon_file))
+                self.root.iconphoto(True, self._window_icon_image)
+
+            log.info("Loaded window icon from %s", icon_file)
+        except Exception:
+            log.exception("Failed to apply window icon from %s", icon_file)
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
