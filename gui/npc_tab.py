@@ -594,6 +594,23 @@ class NPCTab(BaseObjectEntityTab):
 
 
         def _add_vendor_loot(target_component: str) -> None:
+            vendor_matrix_collection = obj.components.get("VendorLootMatrix")
+            existing_vendor_matrix_rows = (
+                self._get_component_rows(vendor_matrix_collection)
+                if self._is_row_collection_component(vendor_matrix_collection)
+                else []
+            )
+            if target_component == "VendorLootMatrix" and existing_vendor_matrix_rows:
+                existing_row = existing_vendor_matrix_rows[0]
+                messagebox.showwarning(
+                    "Vendor loot matrix already exists",
+                    (
+                        f"NPC {obj.object_id} already has a vendor loot matrix.\n\n"
+                        "Only one vendor loot matrix is allowed. Use VendorLootTable to add more loot entries to the existing matrix."
+                    ),
+                )
+                self._select_npc_target(obj, "VendorLootMatrix", str(existing_row.ui_key))
+                return
             if target_component == "VendorLootTable":
                 matrix_row, loot_row = self._service.add_loot_table_row(obj, "vendor")
             else:
@@ -710,9 +727,29 @@ class NPCTab(BaseObjectEntityTab):
         self._mark_tree_change()
 
     def _delete_loot_entry(self, obj: Any, component_key: str, family: str, loot_table_index: int) -> None:
+        delete_title = "Delete loot entry"
+        delete_message = f"Delete loot entry {loot_table_index} from NPC {obj.object_id}?"
+        if family == "vendor":
+            table_collection = obj.components.get("VendorLootTable")
+            linked_loot_rows = (
+                [
+                    row
+                    for row in self._get_component_rows(table_collection)
+                    if getattr(row, "loot_table_index", None) == loot_table_index
+                ]
+                if self._is_row_collection_component(table_collection)
+                else []
+            )
+            linked_count = len(linked_loot_rows)
+            row_label = "row" if linked_count == 1 else "rows"
+            delete_title = "Delete vendor loot matrix"
+            delete_message = (
+                f"Delete vendor loot matrix {loot_table_index} from NPC {obj.object_id}?\n\n"
+                f"This will also delete {linked_count} linked vendor loot table {row_label} for that matrix."
+            )
         if not messagebox.askyesno(
-            "Delete loot entry",
-            f"Delete loot entry {loot_table_index} from NPC {obj.object_id}?",
+            delete_title,
+            delete_message,
             icon=messagebox.WARNING,
             default=messagebox.NO,
         ):
@@ -830,7 +867,7 @@ class NPCTab(BaseObjectEntityTab):
             if loot_table_index is None:
                 return None
             family = "vendor" if component_key.startswith("Vendor") else "destructible"
-            return ("Delete loot entry (local)", lambda: self._delete_loot_entry(obj, component_key, family, int(loot_table_index)))
+            return ("Delete loot matrix (local)", lambda: self._delete_loot_entry(obj, component_key, family, int(loot_table_index)))
 
         if component_key in {"VendorLootTable", "DestructibleLootTable"}:
             loot_row_id = getattr(row, "id", None)

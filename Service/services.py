@@ -1386,6 +1386,16 @@ class NPCService(BaseService):
 
     def add_loot_entry(self, npc: NPC, family: str) -> LootMatrixRow:
         _matrix_index_collection, matrix_collection, table_index_collection, _table_collection, loot_matrix_index = self._resolve_loot_collections(npc, family)
+        if family == "vendor" and matrix_collection.rows:
+            existing_row = matrix_collection.rows[0]
+            log.info(
+                "Skipped creating additional vendor loot matrix object_id=%s existing_matrix_key=%s existing_loot_matrix_index=%s existing_loot_table_index=%s",
+                npc.object_id,
+                existing_row.ui_key,
+                existing_row.loot_matrix_index,
+                existing_row.loot_table_index,
+            )
+            return existing_row
         loot_table_index = self._reserve_next_int(
             self._repo.generate_new_loot_table_index,
             self._collect_loot_table_indices(npc),
@@ -1524,6 +1534,10 @@ class NPCService(BaseService):
             ]
             if len(table_index_collection.rows) != before:
                 table_index_collection.dirty = True
+        if family == "vendor":
+            matrix_collection = npc.components.get("VendorLootMatrix")
+            if isinstance(matrix_collection, RowCollection) and not matrix_collection.rows:
+                self.clear_vendor_loot_link(npc)
 
     def remove_loot_table_row(self, npc: NPC, family: str, row_id: int) -> None:
         key = "VendorLootTable" if family == "vendor" else "DestructibleLootTable"
