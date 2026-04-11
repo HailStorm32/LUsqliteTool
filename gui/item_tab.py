@@ -113,7 +113,7 @@ class ItemsTab(BaseObjectEntityTab):
         # Advanced field toggle (affects filtering logic in form build)
         toggle_bar = ttk.Frame(self.detail)
         toggle_bar.pack(fill=tk.X, padx=10, pady=(0, 5))
-        self.show_advanced_var = tk.BooleanVar(value=False)
+        self.show_advanced_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             toggle_bar,
             text="Show advanced fields",
