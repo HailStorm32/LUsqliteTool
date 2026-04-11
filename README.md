@@ -211,8 +211,9 @@ After setup, run the app with the virtual environment's Python.
 
 
 
-`main.spec` reads `APP_TITLE` and `APP_ICON_PATH` from `main.py` and uses the
-same executable name and icon settings.
+The recommended build path is `build_pyinstaller.py`. It reads `APP_TITLE` and
+`APP_ICON_PATH` from `main.py`, then passes the matching executable name,
+bundled icon asset, and `.exe` icon settings to PyInstaller.
 
 
 
@@ -222,7 +223,7 @@ same executable name and icon settings.
 
 ```powershell
 
-.\.env\Scripts\python.exe -m PyInstaller main.spec
+.\.env\Scripts\python.exe build_pyinstaller.py
 
 ```
 
@@ -234,21 +235,9 @@ same executable name and icon settings.
 
 ```bash
 
-./.env/bin/python -m PyInstaller main.spec
+./.env/bin/python build_pyinstaller.py
 
 ```
-
-
-
-If you prefer building with a raw command, you must pass the executable name and
-icon settings explicitly.
-
-Raw commands like `python3 -m PyInstaller --onefile --windowed .\main.py` do not
-pick up `APP_TITLE` or `APP_ICON_PATH` automatically, so the executable name and
-icon file will not match your app config unless you also pass the matching
-`--name`, `--add-data`, and `--icon` arguments yourself.
-
-
 
 ### Optional Runtime Configuration
 
