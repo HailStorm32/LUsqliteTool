@@ -1,7 +1,8 @@
 ﻿
 # LU Sqlite Tool
+_Created with Codex_
 
-
+<br>
 
 Desktop GUI for editing LEGO Universe SQLite client databases with focused workflows for `Items` and `NPCs`.
 
