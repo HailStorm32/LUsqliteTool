@@ -6,6 +6,8 @@
 Desktop GUI for editing LEGO Universe SQLite client databases with focused workflows for `Items` and `NPCs`.
 
 
+> This tool edits live database content, so keep the generated `.bak` files until you have validated your changes
+
 
 ## End User Quick Start
 
@@ -60,6 +62,7 @@ If you only want to use the app, start here.
 
 
 - The app creates a `.bak` backup next to the selected database before editing
+  > The `.bak` file is overwritten every time you open the program, so keep that in mind
 
 - If you close the app with unsaved changes, it will ask whether you want to save first
 
@@ -127,7 +130,7 @@ Available creation actions:
 
 ## Development Setup
 
-
+> This entire project is Codex generated. Human readability/maintainability is not a priority at this point. A clean up pass is planned closer to a 1.0 release
 
 This section is for running the project from source.
 
@@ -312,11 +315,3 @@ logs/lusqlite_tool.log
 ```
 
 
-
-## Notes
-
-
-
-- This tool edits live database content, so keep the generated `.bak` files until you have validated your changes
-
-- This entire project is Codex generated. Human readability/maintainability was not a priority
