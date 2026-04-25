@@ -2,7 +2,7 @@
 
 import logging
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 from typing import Any
 
 from Domain.domains import RowCollection
@@ -495,10 +495,27 @@ class NPCTab(BaseObjectEntityTab):
             self._service.add_vendor_component(obj)
             _select("VendorComponent")
 
-        def _add_mission_bundle():
+        def _add_new_mission_bundle():
             row = self._service.add_mission_bundle(obj)
             self._refresh_object_branch(obj.object_id, obj)
             self._select_npc_target(obj, "MissionNPCComponent", str(row.mission_id))
+            self._mark_tree_change()
+
+        def _add_existing_mission_bundle(target_component: str = "MissionNPCComponent") -> None:
+            mission_id = simpledialog.askinteger(
+                "Add Existing Mission Bundle",
+                f"Enter the mission ID to add to NPC {obj.object_id}:",
+                parent=self.winfo_toplevel(),
+                minvalue=1,
+            )
+            if mission_id is None:
+                return
+            try:
+                row = self._service.add_existing_mission_bundle(obj, mission_id)
+            except ValueError as exc:
+                messagebox.showerror("Add Existing Mission Bundle Failed", str(exc))
+                return
+            self._select_npc_target(obj, target_component, str(row.mission_id))
             self._mark_tree_change()
 
         def _add_script():
@@ -511,7 +528,8 @@ class NPCTab(BaseObjectEntityTab):
         actions.append(("Inventory Component", _add_inventory, "InventoryComponent" not in existing))
         actions.append(("Destructible Component", _add_destructible, "DestructibleComponent" not in existing))
         actions.append(("Vendor Component", _add_vendor, "VendorComponent" not in existing))
-        actions.append(("Mission Bundle", _add_mission_bundle, True))
+        actions.append(("Add New Mission Bundle", _add_new_mission_bundle, True))
+        actions.append(("Add Existing Mission Bundle", _add_existing_mission_bundle, True))
         actions.append(("Script Component", _add_script, "ScriptComponent" not in existing))
         return actions
 
@@ -559,8 +577,25 @@ class NPCTab(BaseObjectEntityTab):
             self._select_npc_target(obj, "InventoryComponent", str(row.itemid))
             self._mark_tree_change()
 
-        def _add_mission_bundle(target_component: str) -> None:
+        def _add_new_mission_bundle(target_component: str) -> None:
             row = self._service.add_mission_bundle(obj)
+            self._select_npc_target(obj, target_component, str(row.mission_id))
+            self._mark_tree_change()
+
+        def _add_existing_mission_bundle_for_target(target_component: str) -> None:
+            mission_id = simpledialog.askinteger(
+                "Add Existing Mission Bundle",
+                f"Enter the mission ID to add to NPC {obj.object_id}:",
+                parent=self.winfo_toplevel(),
+                minvalue=1,
+            )
+            if mission_id is None:
+                return
+            try:
+                row = self._service.add_existing_mission_bundle(obj, mission_id)
+            except ValueError as exc:
+                messagebox.showerror("Add Existing Mission Bundle Failed", str(exc))
+                return
             self._select_npc_target(obj, target_component, str(row.mission_id))
             self._mark_tree_change()
 
@@ -639,9 +674,18 @@ class NPCTab(BaseObjectEntityTab):
 
         action_map: dict[str, list[tuple[str, Any]]] = {
             "InventoryComponent": [("Add inventory row", _add_inventory_row)],
-            "MissionNPCComponent": [("Add mission bundle", lambda: _add_mission_bundle("MissionNPCComponent"))],
-            "Missions": [("Add mission bundle", lambda: _add_mission_bundle("Missions"))],
-            "MissionText": [("Add mission bundle", lambda: _add_mission_bundle("MissionText"))],
+            "MissionNPCComponent": [
+                ("Add New Mission Bundle", lambda: _add_new_mission_bundle("MissionNPCComponent")),
+                ("Add Existing Mission Bundle", lambda: _add_existing_mission_bundle_for_target("MissionNPCComponent")),
+            ],
+            "Missions": [
+                ("Add New Mission Bundle", lambda: _add_new_mission_bundle("Missions")),
+                ("Add Existing Mission Bundle", lambda: _add_existing_mission_bundle_for_target("Missions")),
+            ],
+            "MissionText": [
+                ("Add New Mission Bundle", lambda: _add_new_mission_bundle("MissionText")),
+                ("Add Existing Mission Bundle", lambda: _add_existing_mission_bundle_for_target("MissionText")),
+            ],
             "MissionTasks": [("Add task row", _add_task)],
             "MissionEmail": [("Add email row", _add_email)],
             "VendorComponent": [("Set LootMatrix link to None (0)", _clear_vendor_loot_link)],

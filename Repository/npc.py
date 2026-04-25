@@ -337,6 +337,21 @@ class NPCRepository(baseRepository):
     def generate_new_mission_email_id(self) -> int:
         return self._next_int("MissionEmail", "ID")
 
+    def get_existing_mission_bundle(self, mission_id: int) -> dict[str, Any] | None:
+        conn = self._connect_to_db()
+        try:
+            missions = self._load_rows_by_ids(conn, "Missions", "id", {mission_id}, MissionRow, _MISSION_MAP)
+            if not missions:
+                return None
+            return {
+                "mission": missions[0],
+                "mission_text": self._load_rows_by_ids(conn, "MissionText", "id", {mission_id}, MissionTextRow, _MISSION_TEXT_MAP),
+                "mission_tasks": self._load_rows_by_ids(conn, "MissionTasks", "id", {mission_id}, MissionTaskRow, _MISSION_TASK_MAP),
+                "mission_email": self._load_rows_by_ids(conn, "MissionEmail", "missionID", {mission_id}, MissionEmailRow, _MISSION_EMAIL_MAP),
+            }
+        finally:
+            conn.close()
+
     # ------------------------------------------------------------------
     # Load
     # ------------------------------------------------------------------

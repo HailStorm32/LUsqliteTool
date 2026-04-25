@@ -1320,6 +1320,74 @@ class NPCService(BaseService):
             mission_email.dirty = True
         return mission_row
 
+    def add_existing_mission_bundle(self, npc: NPC, mission_id: int) -> MissionNPCComponentRow:
+        mission_id = self._require_positive_int(mission_id, "Mission ID")
+        mission_collection = self._ensure_component_row_collection(
+            npc,
+            "MissionNPCComponent",
+            table="MissionNPCComponent",
+            key_field="mission_id",
+            label_prefix="Mission",
+        )
+        if any(getattr(row, "mission_id", None) == mission_id for row in mission_collection.rows):
+            raise ValueError(f"NPC {npc.object_id} already has mission bundle {mission_id}.")
+
+        bundle = self._repo.get_existing_mission_bundle(mission_id)
+        if bundle is None:
+            raise ValueError(f"Mission {mission_id} does not exist.")
+
+        missions = self._ensure_row_collection(npc, "Missions", key_field="id", label_prefix="Mission")
+        mission_text = self._ensure_row_collection(npc, "MissionText", key_field="id", label_prefix="Text")
+        mission_tasks = self._ensure_row_collection(npc, "MissionTasks", key_field="uid", label_prefix="Task")
+        mission_email = self._ensure_row_collection(npc, "MissionEmail", key_field="id", label_prefix="Email")
+
+        missions_was_dirty = missions.dirty
+        mission_text_was_dirty = mission_text.dirty
+        mission_tasks_was_dirty = mission_tasks.dirty
+        mission_email_was_dirty = mission_email.dirty
+
+        component_id = int(mission_collection.component_id or npc.object_id)
+        mission_row = self._build_component_with_metadata_defaults(
+            MissionNPCComponentRow,
+            "MissionNPCComponentRow",
+            id=component_id,
+            mission_id=mission_id,
+        )
+        mission_collection.rows.append(mission_row)
+        mission_collection.dirty = True
+
+        missions.rows.append(bundle["mission"])
+        missions.loaded_keys.add(mission_id)
+        missions.dirty = missions_was_dirty
+
+        mission_text_rows = list(bundle["mission_text"])
+        if mission_text_rows:
+            mission_text.rows.extend(mission_text_rows)
+        mission_text.loaded_keys.add(mission_id)
+        mission_text.dirty = mission_text_was_dirty
+
+        mission_task_rows = list(bundle["mission_tasks"])
+        if mission_task_rows:
+            mission_tasks.rows.extend(mission_task_rows)
+        mission_tasks.loaded_keys.add(mission_id)
+        mission_tasks.dirty = mission_tasks_was_dirty
+
+        mission_email_rows = list(bundle["mission_email"])
+        if mission_email_rows:
+            mission_email.rows.extend(mission_email_rows)
+        mission_email.loaded_keys.add(mission_id)
+        mission_email.dirty = mission_email_was_dirty
+
+        log.info(
+            "Added existing mission bundle object_id=%s mission_id=%s tasks=%s text=%s email=%s",
+            npc.object_id,
+            mission_id,
+            len(mission_task_rows),
+            len(mission_text_rows),
+            len(mission_email_rows),
+        )
+        return mission_row
+
     def add_task_row(self, npc: NPC) -> MissionTaskRow:
         mission_id = self._get_or_create_primary_mission_id(npc)
         collection = self._ensure_row_collection(npc, "MissionTasks", key_field="uid", label_prefix="Task")
