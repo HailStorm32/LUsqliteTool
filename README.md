@@ -259,6 +259,20 @@ You can adjust these values at the top of `main.py`:
 
 -  `LOG_FILE_ONLY`: disable console logging
 
+### Minifig Face Preview Note
+
+The Minifig face editor can preview `.dds` and `.gfx` client assets.
+
+If you choose a LEGO Universe client folder for the face editor, the app
+remembers it and prefills that field on later launches using `app_settings.json`
+next to the executable, or in the project root when running from source.
+
+The `.gfx` preview path uses a small vendored and patched subset of `pyswf`
+under `gui/_vendor/swf` instead of a normal `pip install pyswf` dependency.
+That code is vendored because the upstream package was not installable cleanly
+in this environment and still needed Python 3 compatibility fixes for the
+preview workflow used here.
+
 -  `APP_TITLE`: base window title shown in the title bar
 
 -  `APP_VERSION`: version shown in the window title

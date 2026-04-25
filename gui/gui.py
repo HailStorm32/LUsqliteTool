@@ -21,6 +21,72 @@ from Domain.domains import ColorType  # Color enum used for item color field and
 from Service.services import Item
 
 log = logging.getLogger(__name__)
+APP_SETTINGS_FILENAME = "app_settings.json"
+
+
+def get_app_settings_path() -> Path:
+    """Return the JSON file used for lightweight app settings."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / APP_SETTINGS_FILENAME
+    return Path(__file__).resolve().parents[1] / APP_SETTINGS_FILENAME
+
+
+def load_app_settings(settings_path: Path | None = None) -> dict[str, Any]:
+    """Load persisted application settings from disk."""
+    path = get_app_settings_path() if settings_path is None else Path(settings_path)
+    if not path.is_file():
+        return {}
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict):
+            return data
+        log.warning("Ignoring app settings at %s because the root value is not an object.", path)
+    except Exception:
+        log.exception("Failed loading application settings from %s", path)
+    return {}
+
+
+def save_app_settings(settings: dict[str, Any], settings_path: Path | None = None) -> bool:
+    """Persist lightweight application settings to disk."""
+    path = get_app_settings_path() if settings_path is None else Path(settings_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(settings, handle, indent=2, sort_keys=True)
+        return True
+    except Exception:
+        log.exception("Failed saving application settings to %s", path)
+        return False
+
+
+def normalize_directory_path(path: str | Path | None) -> Path | None:
+    """Normalize a user-supplied directory path without requiring it to exist."""
+    if not path:
+        return None
+
+    resolved = Path(path).expanduser()
+    try:
+        return resolved.resolve()
+    except Exception:
+        return resolved.absolute()
+
+
+def get_saved_client_path(settings: dict[str, Any]) -> Path | None:
+    """Return a persisted client path only when it still points at a directory."""
+    raw_path = settings.get("client_path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+
+    normalized_path = normalize_directory_path(raw_path)
+    if normalized_path is None:
+        return None
+    if normalized_path.is_dir():
+        return normalized_path
+
+    log.info("Saved LEGO Universe client path is no longer available: %s", normalized_path)
+    return None
 
 
 class BaseObjectEntityTab(ttk.Frame):
@@ -762,6 +828,7 @@ class BaseObjectEntityTab(ttk.Frame):
 
         # Store entry widgets for saving (name, tk.Variable, py_type, readonly)
         self._entry_widgets: list[tuple[str, tk.Variable, Any, bool]] = []
+        self._entry_vars: dict[str, tk.Variable] = {}
         self._field_lookup_specs: dict[str, Any] = {}
 
         comp_meta = component_field_metadata.get(str(form_target["metadata_key"]), {})
@@ -1061,6 +1128,7 @@ class BaseObjectEntityTab(ttk.Frame):
             # Keep track of the field so the Save handler can apply changes later.
             # We save the declared dataclass field type (f.type) to guide basic coercion.
             self._entry_widgets.append((f.name, var, py_type, readonly))
+            self._entry_vars[f.name] = var
 
             # Mark unsaved state as soon as a field value changes
             try:
@@ -1076,8 +1144,27 @@ class BaseObjectEntityTab(ttk.Frame):
                 info_label.grid(row=row, column=2, sticky=tk.W, padx=(4, 2), pady=2)
                 self._add_tooltip(info_label, tip_text)
 
+        try:
+            self._append_form_actions(inner, component_type, form_target, len(self._entry_widgets))
+        except Exception:
+            log.exception(
+                "Failed building custom form actions for component '%s' (object_id=%s)",
+                component_type,
+                getattr(obj, "object_id", None),
+            )
+
         # Enable the Save button once there is an editable form
         self.save_button.configure(state=tk.NORMAL)
+
+    def _append_form_actions(
+        self,
+        parent: tk.Misc,
+        component_type: str,
+        form_target: dict[str, Any],
+        next_row: int,
+    ) -> None:
+        """Allow subclasses to append component-specific controls beneath the generic form."""
+        return None
 
     # ------------------------------------------------------------------
     # Tooltip helpers
@@ -2610,6 +2697,9 @@ class Application:
         self.version = version
         self.window_size = window_size
         self.icon_path = icon_path
+        self.settings_path = get_app_settings_path()
+        self._app_settings = load_app_settings(self.settings_path)
+        self.client_path: Path | None = get_saved_client_path(self._app_settings)
         self._window_icon_image: tk.PhotoImage | None = None
         self.root = tk.Tk()
         # Compose a friendly title that includes the version when provided
@@ -2721,7 +2811,13 @@ class Application:
         notebook.add(self.items_tab, text="Items")
 
         # NPC tab --------------------------------------------------
-        self.npc_tab = NPCTab(notebook, self.npc_service)
+        self.npc_tab = NPCTab(
+            notebook,
+            self.npc_service,
+            get_client_path=self.get_client_path,
+            set_client_path=self.set_client_path,
+            browse_client_path=self.browse_client_path,
+        )
         notebook.add(self.npc_tab, text="NPCs")
 
         # Intercept window close to warn about unsaved changes
@@ -2769,6 +2865,52 @@ class Application:
             # If anything unexpected, fall back to normal close
             log.exception("Unexpected error during close handler")
             self.root.destroy()
+
+    def get_client_path(self) -> Path | None:
+        """Return the optional LEGO Universe client folder used for asset previews."""
+        return self.client_path
+
+    def set_client_path(self, path: str | Path | None) -> None:
+        """Store the optional LEGO Universe client or res folder."""
+        if not path:
+            self.client_path = None
+            self._app_settings.pop("client_path", None)
+            save_app_settings(self._app_settings, self.settings_path)
+            log.info("Cleared optional LEGO Universe client path")
+            return
+
+        resolved = normalize_directory_path(path)
+        if resolved is None:
+            self.client_path = None
+            self._app_settings.pop("client_path", None)
+            save_app_settings(self._app_settings, self.settings_path)
+            log.info("Cleared optional LEGO Universe client path")
+            return
+        self.client_path = resolved
+        self._app_settings["client_path"] = str(resolved)
+        save_app_settings(self._app_settings, self.settings_path)
+        log.info("Set optional LEGO Universe client path to %s", resolved)
+
+    def browse_client_path(self) -> Path | None:
+        """Prompt the user for the optional LEGO Universe client or res folder."""
+        from tkinter import filedialog
+
+        initial_dir = ""
+        if self.client_path is not None:
+            initial_dir = str(self.client_path)
+
+        selected = filedialog.askdirectory(
+            parent=self.root,
+            title="Select LEGO Universe client folder or res folder",
+            initialdir=initial_dir,
+            mustexist=True,
+        )
+        if not selected:
+            return None
+
+        path = Path(selected)
+        self.set_client_path(path)
+        return path
 
     # ------------------------------------------------------------------
     def run(self) -> None:  # pragma: no cover - visual loop

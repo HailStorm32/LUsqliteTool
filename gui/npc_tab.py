@@ -2,12 +2,14 @@
 
 import logging
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
-from typing import Any
+from pathlib import Path
+from tkinter import filedialog, messagebox, simpledialog, ttk
+from typing import Any, Callable
 
 from Domain.domains import RowCollection
 from Service.services import NPCService
 from .gui import BaseObjectEntityTab
+from .minifig_face_editor import FACE_FIELD_ORDER, choose_minifig_face
 
 log = logging.getLogger(__name__)
 
@@ -82,9 +84,20 @@ class NPCTab(BaseObjectEntityTab):
         "ScriptComponent": ["ScriptComponent"],
     }
 
-    def __init__(self, master: tk.Misc, service: NPCService):
+    def __init__(
+        self,
+        master: tk.Misc,
+        service: NPCService,
+        get_client_path: Callable[[], Path | None] | None = None,
+        set_client_path: Callable[[str | Path | None], None] | None = None,
+        browse_client_path: Callable[[], Path | None] | None = None,
+    ):
         super().__init__(master)
         self._service = service
+        self._get_client_path_callback = get_client_path
+        self._set_client_path_callback = set_client_path
+        self._browse_client_path_callback = browse_client_path
+        self._face_editor_client_var: tk.StringVar | None = None
         self.tree_prefix = "npc"
         self._build_widgets()
 
@@ -264,6 +277,153 @@ class NPCTab(BaseObjectEntityTab):
         self.unsaved_label.pack(side=tk.LEFT, padx=8, pady=(0, 4))
         self._update_unsaved_indicator()
         self._update_undo_button_state()
+
+    def _append_form_actions(
+        self,
+        parent: tk.Misc,
+        component_type: str,
+        form_target: dict[str, Any],
+        next_row: int,
+    ) -> None:
+        if component_type != "MinifigComponent":
+            return
+
+        separator = ttk.Separator(parent, orient=tk.HORIZONTAL)
+        separator.grid(row=next_row, column=0, columnspan=5, sticky=tk.EW, pady=(8, 6))
+        next_row += 1
+
+        tools_frame = ttk.LabelFrame(parent, text="Face Editor")
+        tools_frame.grid(row=next_row, column=0, columnspan=5, sticky=tk.EW, padx=2, pady=(0, 4))
+        tools_frame.columnconfigure(1, weight=1)
+
+        client_path = self._get_client_path()
+        client_display = (
+            str(client_path)
+            if client_path is not None
+            else "Not set. Choose a LEGO Universe client folder or res folder to enable visual face editing."
+        )
+
+        ttk.Label(tools_frame, text="Client folder").grid(row=0, column=0, sticky=tk.W, padx=(8, 8), pady=(8, 4))
+        # Keep the StringVar on the tab instance so Tk does not clear the value
+        # after this form builder returns.
+        self._face_editor_client_var = tk.StringVar(value=client_display)
+        client_entry = ttk.Entry(tools_frame, textvariable=self._face_editor_client_var, state="readonly")
+        client_entry.grid(row=0, column=1, columnspan=3, sticky=tk.EW, padx=(0, 8), pady=(8, 4))
+
+        browse_button = ttk.Button(tools_frame, text="Browse...", command=self._browse_client_path_for_face_editor)
+        browse_button.grid(row=1, column=1, sticky=tk.W, padx=(0, 8), pady=(0, 8))
+
+        clear_button = ttk.Button(tools_frame, text="Clear", command=self._clear_client_path_for_face_editor)
+        clear_button.grid(row=1, column=2, sticky=tk.W, padx=(0, 8), pady=(0, 8))
+        if client_path is None:
+            try:
+                clear_button.configure(state=tk.DISABLED)
+            except Exception:
+                pass
+
+        face_editor_button = ttk.Button(tools_frame, text="Open Face Editor...", command=self._open_face_editor)
+        face_editor_button.grid(row=1, column=3, sticky=tk.E, padx=(0, 8), pady=(0, 8))
+        if client_path is None:
+            try:
+                face_editor_button.configure(state=tk.DISABLED)
+            except Exception:
+                pass
+            self._add_tooltip(
+                face_editor_button,
+                "Set the optional client folder first. The face editor uses client assets to build the visual preview.",
+            )
+
+    def _get_client_path(self) -> Path | None:
+        if self._get_client_path_callback is None:
+            return None
+        try:
+            return self._get_client_path_callback()
+        except Exception:
+            log.exception("Failed reading client path from application state")
+            return None
+
+    def _set_client_path(self, path: str | Path | None) -> None:
+        if self._set_client_path_callback is None:
+            return
+        try:
+            self._set_client_path_callback(path)
+        except Exception:
+            log.exception("Failed storing client path in application state")
+
+    def _browse_client_path_for_face_editor(self) -> None:
+        selected_path: Path | None = None
+        if self._browse_client_path_callback is not None:
+            try:
+                selected_path = self._browse_client_path_callback()
+            except Exception:
+                log.exception("Application client-path browse callback failed")
+
+        if selected_path is None:
+            initial_dir = ""
+            current_path = self._get_client_path()
+            if current_path is not None:
+                initial_dir = str(current_path)
+            selected = filedialog.askdirectory(
+                parent=self.winfo_toplevel(),
+                title="Select LEGO Universe client folder or res folder",
+                initialdir=initial_dir,
+                mustexist=True,
+            )
+            if selected:
+                selected_path = Path(selected)
+                self._set_client_path(selected_path)
+
+        if selected_path is not None:
+            log.info("Updated client path for minifig face editor to %s", selected_path)
+            self._refresh_form()
+
+    def _clear_client_path_for_face_editor(self) -> None:
+        self._set_client_path(None)
+        log.info("Cleared client path for minifig face editor")
+        self._refresh_form()
+
+    def _get_face_field_var(self, field_name: str) -> tk.Variable | None:
+        for name, var, _typ, _readonly in getattr(self, "_entry_widgets", []):
+            if name == field_name:
+                return var
+        return None
+
+    def _open_face_editor(self) -> None:
+        client_path = self._get_client_path()
+        if client_path is None:
+            messagebox.showinfo(
+                "Client folder required",
+                "Choose a LEGO Universe client folder or res folder before using the face editor.",
+                parent=self.winfo_toplevel(),
+            )
+            return
+
+        initial_values: dict[str, int | None] = {}
+        for field_name in FACE_FIELD_ORDER:
+            var = self._get_face_field_var(field_name)
+            if var is None:
+                initial_values[field_name] = None
+                continue
+            raw_value = str(var.get() or "").strip()
+            initial_values[field_name] = int(raw_value) if raw_value.isdigit() else None
+
+        object_id = getattr(getattr(self, "current_object", None), "object_id", None)
+        selected_values = choose_minifig_face(
+            self.winfo_toplevel(),
+            client_path,
+            initial_values,
+            object_id=object_id,
+        )
+        if selected_values is None:
+            return
+
+        for field_name, value in selected_values.items():
+            var = self._get_face_field_var(field_name)
+            if var is None:
+                continue
+            var.set("" if value is None else str(value))
+
+        log.info("Updated MinifigComponent face ids from picker for object_id=%s", object_id)
 
     def _parse_optional_id_from_entry(self) -> int | None:
         raw_id = (self.create_id_var.get() or "").strip() if hasattr(self, "create_id_var") else ""

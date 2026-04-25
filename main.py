@@ -25,7 +25,7 @@ DB_PATH: str | None = None
 # Base window title shown in the title bar.
 APP_TITLE: str = "LU SQLite Tool (LU.S.T)"
 # Application version shown in the window title. Update as you release.
-APP_VERSION: str = "0.2.0"
+APP_VERSION: str = "0.2.1dev"
 # Default window size passed to the GUI on startup. Format: "WIDTHxHEIGHT"
 WINDOW_SIZE: str = "1480x900"
 # Optional window icon shown in the title bar. On Windows, use a .ico

@@ -216,3 +216,5 @@ logs/
 *.bak
 *.sqlite-*
 client_test.bat
+app_settings.json
+face_preview_cache/
