@@ -16,3 +16,7 @@ It is vendored instead of imported as a normal dependency because:
 - the app only needs a narrow local rendering path for preview generation.
 
 Keep changes here focused on the face-preview use case.
+
+The vendored SWF code is not intended to be a byte-for-byte mirror of the
+upstream repo. The exact upstream reference and the known local patch reasons
+are recorded in `swf/UPSTREAM.md`.

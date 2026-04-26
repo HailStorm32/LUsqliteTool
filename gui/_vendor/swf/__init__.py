@@ -11,6 +11,8 @@ import builtins
 from functools import reduce as _reduce
 
 __version__ = "1.5.4"
+__upstream_repo__ = "https://github.com/timknip/pyswf"
+__upstream_ref__ = "3740cc80d7650156831e728ea0d408819e5671eb"
 
 # The original PySWF code targets Python 2. Expose a few Python 2 builtins so
 # the vendored modules can stay close to upstream while we only patch the
