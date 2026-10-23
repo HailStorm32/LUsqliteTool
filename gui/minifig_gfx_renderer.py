@@ -70,6 +70,7 @@ def render_gfx_preview(source_path: Path, output_path: Path) -> Path | None:
         return None
 
     if image is None:
+        log.warning("GFX face preview from %s produced no image; leaving it uncached", source_path)
         return None
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,8 +86,21 @@ def render_gfx_preview_image(source_path: Path):
     operations: list[DrawOperation] = []
     _render_timeline(swf, dictionary, Matrix2(), operations)
     if not operations:
-        return None
+        # Some assets (e.g. brows_33.gfx) contain only empty sprites and the
+        # shared ActionScript loader: no shapes or bitmaps at all. They are
+        # genuinely blank, so render a transparent stage-sized preview.
+        log.warning(
+            "GFX face asset %s has no drawable shapes in its first frame; rendering a blank preview",
+            source_path,
+        )
+        return _blank_stage_image(swf.header.frame_size)
     return _rasterize_operations(operations, swf.header.frame_size)
+
+
+def _blank_stage_image(stage_bounds):
+    width = max(1, int(round((stage_bounds.xmax - stage_bounds.xmin) / 20.0)) + 2)
+    height = max(1, int(round((stage_bounds.ymax - stage_bounds.ymin) / 20.0)) + 2)
+    return Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
 
 def _load_gfx_as_swf(source_path: Path) -> SWF:
